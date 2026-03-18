@@ -47,6 +47,7 @@ export function runAgentSync(
       requestTimeoutMs: 60_000,
       spawnOptions: config.acpSpawnOptions,
       skipAuthenticate: config.acpSkipAuthenticate,
+      rawDebug: config.acpRawDebug,
     }).then((out) => {
       if (tempDir) {
         try {
@@ -102,6 +103,7 @@ export function runAgentStream(
         requestTimeoutMs: 60_000,
         spawnOptions: config.acpSpawnOptions,
         skipAuthenticate: config.acpSkipAuthenticate,
+        rawDebug: config.acpRawDebug,
       },
       onLine,
     ).then((result) => {

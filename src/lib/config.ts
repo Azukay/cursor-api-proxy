@@ -40,6 +40,8 @@ export type BridgeConfig = {
   acpSpawnOptions?: { windowsVerbatimArguments?: boolean };
   /** When true, skip ACP authenticate step (use when pre-authenticated via --api-key or agent login). */
   acpSkipAuthenticate: boolean;
+  /** When true, log every raw JSON-RPC line from ACP stdout (very verbose). Set CURSOR_BRIDGE_ACP_RAW_DEBUG=1 to enable. */
+  acpRawDebug: boolean;
 };
 
 function acpArgsWithApiKey(
@@ -97,5 +99,8 @@ export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
       /^(1|true|yes|on)$/i.test(
         String(envSource.CURSOR_BRIDGE_ACP_SKIP_AUTHENTICATE ?? "").trim(),
       ),
+    acpRawDebug: /^(1|true|yes|on)$/i.test(
+      String(envSource.CURSOR_BRIDGE_ACP_RAW_DEBUG ?? "").trim(),
+    ),
   };
 }

@@ -22,6 +22,8 @@ export type AcpRunOptions = {
   spawnOptions?: { windowsVerbatimArguments?: boolean };
   /** When true, skip authenticate step (use when pre-authenticated via --api-key or agent login). */
   skipAuthenticate?: boolean;
+  /** When true, log every raw JSON-RPC line from ACP stdout (very verbose). */
+  rawDebug?: boolean;
 };
 
 export type AcpSyncResult = {
@@ -146,6 +148,9 @@ export function runAcpSync(
     const rl = readline.createInterface({ input: child.stdout! });
     rl.on("line", (line: string) => {
       try {
+        if (opts.rawDebug) {
+          debugAcp("ACP raw: %s", line);
+        }
         const msg = JSON.parse(line) as {
           id?: number;
           method?: string;
@@ -168,25 +173,44 @@ export function runAcpSync(
         }
 
         if (msg.method === "session/update") {
-          const update = msg.params?.update;
+          const update = (msg.params?.update ?? msg.params) as {
+            sessionUpdate?: string;
+            content?: { text?: string } | Array<{ content?: { text?: string }; text?: string }>;
+          } | undefined;
+          const content = update?.content;
+          const text =
+            typeof content === "object" && content !== null && !Array.isArray(content) && typeof (content as { text?: string }).text === "string"
+              ? (content as { text: string }).text
+              : Array.isArray(content)
+                ? content
+                    .map((c: { content?: { text?: string }; text?: string }) =>
+                      typeof c?.content?.text === "string"
+                        ? c.content.text
+                        : typeof c?.text === "string"
+                          ? c.text
+                          : "",
+                    )
+                    .join("")
+                : "";
+          const sessionUpdate = update?.sessionUpdate;
           if (
-            update?.sessionUpdate === "agent_message_chunk" &&
-            typeof update.content?.text === "string"
+            (sessionUpdate === "agent_message_chunk" || sessionUpdate === "agent_thought_chunk") &&
+            text
           ) {
-            accumulated += update.content.text;
+            accumulated += text;
           } else if (
-            update?.sessionUpdate &&
-            update.sessionUpdate !== "agent_thought_chunk" &&
-            update.sessionUpdate !== "available_commands_update" &&
-            update.sessionUpdate !== "tool_call" &&
-            update.sessionUpdate !== "tool_call_update"
+            sessionUpdate &&
+            sessionUpdate !== "agent_thought_chunk" &&
+            sessionUpdate !== "available_commands_update" &&
+            sessionUpdate !== "tool_call" &&
+            sessionUpdate !== "tool_call_update"
           ) {
             debugAcp(
               "session/update (unhandled): %s",
               JSON.stringify({
-                sessionUpdate: update.sessionUpdate,
-                hasContent: !!update.content,
-                contentKeys: update.content ? Object.keys(update.content) : [],
+                sessionUpdate,
+                hasContent: !!content,
+                contentKeys: content && typeof content === "object" && !Array.isArray(content) ? Object.keys(content) : [],
               }),
             );
           }
@@ -196,10 +220,25 @@ export function runAcpSync(
         if (msg.method === "session/request_permission") {
           if (msg.id != null && child.stdin) {
             respond(child.stdin, msg.id, {
-              outcome: { outcome: "selected", optionId: "allow-once" },
+              outcome: { outcome: "selected", optionId: "reject-once" },
             });
           }
           return;
+        }
+
+        if (msg.id != null && msg.method && child.stdin) {
+          const method = String(msg.method);
+          if (method.startsWith("cursor/")) {
+            const params = msg.params as Record<string, unknown> | undefined;
+            if (method === "cursor/ask_question" && params?.options && Array.isArray(params.options)) {
+              const first = params.options[0] as { id?: string } | undefined;
+              respond(child.stdin, msg.id, { selectedId: first?.id ?? "" });
+            } else if (method === "cursor/create_plan") {
+              respond(child.stdin, msg.id, { approved: true });
+            } else {
+              respond(child.stdin, msg.id, {});
+            }
+          }
         }
       } catch {
         /* ignore parse errors */
@@ -264,6 +303,9 @@ export function runAcpSync(
           sessionId,
           prompt: [{ type: "text", text: prompt }],
         }, pending, requestTimeoutMs);
+        if (accumulated.length === 0) {
+          debugAcp("ACP sync: no content accumulated; stderr tail: %s", stderr.slice(-500));
+        }
         finish(0);
       } catch {
         if (timeout) clearTimeout(timeout);
@@ -336,6 +378,9 @@ export function runAcpStream(
     const rl = readline.createInterface({ input: child.stdout! });
     rl.on("line", (line: string) => {
       try {
+        if (opts.rawDebug) {
+          debugAcp("ACP raw: %s", line);
+        }
         const msg = JSON.parse(line) as {
           id?: number;
           method?: string;
@@ -358,25 +403,44 @@ export function runAcpStream(
         }
 
         if (msg.method === "session/update") {
-          const update = msg.params?.update;
+          const update = (msg.params?.update ?? msg.params) as {
+            sessionUpdate?: string;
+            content?: { text?: string } | Array<{ content?: { text?: string }; text?: string }>;
+          } | undefined;
+          const content = update?.content;
+          const text =
+            typeof content === "object" && content !== null && !Array.isArray(content) && typeof (content as { text?: string }).text === "string"
+              ? (content as { text: string }).text
+              : Array.isArray(content)
+                ? content
+                    .map((c: { content?: { text?: string }; text?: string }) =>
+                      typeof c?.content?.text === "string"
+                        ? c.content.text
+                        : typeof c?.text === "string"
+                          ? c.text
+                          : "",
+                    )
+                    .join("")
+                : "";
+          const sessionUpdate = update?.sessionUpdate;
           if (
-            update?.sessionUpdate === "agent_message_chunk" &&
-            typeof update.content?.text === "string"
+            (sessionUpdate === "agent_message_chunk" || sessionUpdate === "agent_thought_chunk") &&
+            text
           ) {
-            onChunk(update.content.text);
+            onChunk(text);
           } else if (
-            update?.sessionUpdate &&
-            update.sessionUpdate !== "agent_thought_chunk" &&
-            update.sessionUpdate !== "available_commands_update" &&
-            update.sessionUpdate !== "tool_call" &&
-            update.sessionUpdate !== "tool_call_update"
+            sessionUpdate &&
+            sessionUpdate !== "agent_thought_chunk" &&
+            sessionUpdate !== "available_commands_update" &&
+            sessionUpdate !== "tool_call" &&
+            sessionUpdate !== "tool_call_update"
           ) {
             debugAcp(
               "session/update (unhandled): %s",
               JSON.stringify({
-                sessionUpdate: update.sessionUpdate,
-                hasContent: !!update.content,
-                contentKeys: update.content ? Object.keys(update.content) : [],
+                sessionUpdate,
+                hasContent: !!content,
+                contentKeys: content && typeof content === "object" && !Array.isArray(content) ? Object.keys(content) : [],
               }),
             );
           }
@@ -386,7 +450,7 @@ export function runAcpStream(
         if (msg.method === "session/request_permission") {
           if (msg.id != null && child.stdin) {
             respond(child.stdin, msg.id, {
-              outcome: { outcome: "selected", optionId: "allow-once" },
+              outcome: { outcome: "selected", optionId: "reject-once" },
             });
           }
           return;
