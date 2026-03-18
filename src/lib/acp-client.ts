@@ -106,6 +106,12 @@ export function runAcpSync(
     const finish = (code: number) => {
       if (resolved) return;
       resolved = true;
+      const exitErr = new Error(`ACP child exited with code ${code}`);
+      for (const [id, waiter] of Array.from(pending.entries())) {
+        pending.delete(id);
+        if (waiter.timerId) clearTimeout(waiter.timerId);
+        waiter.reject(exitErr);
+      }
       try {
         child.stdin?.end();
         child.kill("SIGKILL");
@@ -288,6 +294,12 @@ export function runAcpStream(
     const finish = (code: number) => {
       if (resolved) return;
       resolved = true;
+      const exitErr = new Error(`ACP child exited with code ${code}`);
+      for (const [id, waiter] of Array.from(pending.entries())) {
+        pending.delete(id);
+        if (waiter.timerId) clearTimeout(waiter.timerId);
+        waiter.reject(exitErr);
+      }
       try {
         child.stdin?.end();
         child.kill("SIGKILL");
@@ -308,7 +320,7 @@ export function runAcpStream(
     const nextId = { current: 1 };
     const pending = new Map<
       number,
-      { resolve: (value: unknown) => void; reject: (err: Error) => void }
+      { resolve: (value: unknown) => void; reject: (err: Error) => void; timerId?: ReturnType<typeof setTimeout> }
     >();
 
     const rl = readline.createInterface({ input: child.stdout! });
