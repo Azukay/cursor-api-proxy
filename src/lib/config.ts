@@ -44,22 +44,12 @@ export type BridgeConfig = {
   acpRawDebug: boolean;
 };
 
-function acpArgsWithApiKey(
-  args: string[],
-  apiKey: string | undefined,
-): string[] {
-  if (!apiKey?.trim()) return args;
-  const i = args.indexOf("acp");
-  if (i === -1) return args;
-  return [...args.slice(0, i), "--api-key", apiKey.trim(), ...args.slice(i)];
-}
-
 export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
   const env = loadEnvConfig(opts);
   const acpResolved = resolveAgentCommand(env.agentBin, ["acp"], opts);
   const envSource = opts.env ?? process.env;
   const apiKey = envSource.CURSOR_API_KEY ?? envSource.CURSOR_AUTH_TOKEN;
-  const acpArgs = acpArgsWithApiKey(acpResolved.args, apiKey);
+  const acpArgs = acpResolved.args;
 
   const acpEnv = { ...acpResolved.env } as Record<string, string | undefined>;
   if (apiKey) {

@@ -231,7 +231,13 @@ export function runAcpSync(
           if (method.startsWith("cursor/")) {
             const params = msg.params as Record<string, unknown> | undefined;
             if (method === "cursor/ask_question" && params?.options && Array.isArray(params.options)) {
-              const first = params.options[0] as { id?: string } | undefined;
+              const options = params.options as Array<{ id?: string; label?: string }>;
+              const first = options[0];
+              console.warn(
+                "[cursor-api-proxy:acp] cursor/ask_question auto-selecting first option: id=%s (total=%d)",
+                first?.id ?? "(none)",
+                options.length,
+              );
               respond(child.stdin, msg.id, { selectedId: first?.id ?? "" });
             } else if (method === "cursor/create_plan") {
               respond(child.stdin, msg.id, { approved: true });
