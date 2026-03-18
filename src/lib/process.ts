@@ -15,6 +15,8 @@ export type RunOptions = {
   maxMode?: boolean;
   /** When set, pass this string to the child process stdin and close it (avoids long prompt in argv on Windows). */
   stdinContent?: string;
+  /** Env overrides for the child (e.g. HOME, CURSOR_CONFIG_DIR to isolate from global rules). */
+  envOverrides?: Record<string, string>;
 };
 
 export type RunStreamingOptions = RunOptions & {
@@ -24,7 +26,7 @@ export type RunStreamingOptions = RunOptions & {
 function spawnChild(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; maxMode?: boolean; stdinContent?: string },
+  opts?: { cwd?: string; maxMode?: boolean; stdinContent?: string; envOverrides?: Record<string, string> },
 ) {
   const resolved = resolveAgentCommand(cmd, args);
 
@@ -35,6 +37,9 @@ function spawnChild(
   const env = { ...resolved.env };
   if (resolved.configDir && !env.CURSOR_CONFIG_DIR) {
     env.CURSOR_CONFIG_DIR = resolved.configDir;
+  }
+  if (opts?.envOverrides) {
+    Object.assign(env, opts.envOverrides);
   }
 
   const useStdin = typeof opts?.stdinContent === "string";
@@ -63,6 +68,7 @@ export function runStreaming(
       cwd: opts.cwd,
       maxMode: opts.maxMode,
       stdinContent: opts.stdinContent,
+      envOverrides: opts.envOverrides,
     });
 
     const timeoutMs = opts.timeoutMs;
@@ -116,6 +122,7 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
       cwd: opts.cwd,
       maxMode: opts.maxMode,
       stdinContent: opts.stdinContent,
+      envOverrides: opts.envOverrides,
     });
 
     const timeoutMs = opts.timeoutMs;

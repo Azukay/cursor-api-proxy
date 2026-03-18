@@ -63,6 +63,7 @@ function createTestConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig {
     promptViaStdin: false,
     useAcp: false,
     acpSkipAuthenticate: false,
+    acpRawDebug: false,
     ...overrides,
   };
 }

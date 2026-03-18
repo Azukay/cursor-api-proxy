@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { runAcpStream, runAcpSync } from "./acp-client.js";
 import type { BridgeConfig } from "./config.js";
@@ -38,7 +39,12 @@ export function runAgentSync(
     const acpModel = extractModelFromCmdArgs(cmdArgs);
     let args = acpArgsWithWorkspace(config.acpArgs, workspaceDir);
     args = acpModel ? acpArgsWithModel(args, acpModel) : args;
-    const acpEnv = config.acpEnv;
+    const acpEnv = { ...config.acpEnv };
+    if (config.chatOnlyWorkspace) {
+      acpEnv.CURSOR_CONFIG_DIR = path.join(workspaceDir, ".cursor");
+      acpEnv.HOME = workspaceDir;
+      acpEnv.USERPROFILE = workspaceDir;
+    }
     return runAcpSync(config.acpCommand, args, stdinPrompt, {
       cwd: workspaceDir,
       timeoutMs: config.timeoutMs,
@@ -59,11 +65,20 @@ export function runAgentSync(
       return out;
     });
   }
+  const runEnvOverrides =
+    config.chatOnlyWorkspace
+      ? {
+          CURSOR_CONFIG_DIR: path.join(workspaceDir, ".cursor"),
+          HOME: workspaceDir,
+          USERPROFILE: workspaceDir,
+        }
+      : undefined;
   return run(config.agentBin, cmdArgs, {
     cwd: workspaceDir,
     timeoutMs: config.timeoutMs,
     maxMode: config.maxMode,
     stdinContent: stdinPrompt,
+    envOverrides: runEnvOverrides,
   }).then((out) => {
     if (tempDir) {
       try {
@@ -90,7 +105,12 @@ export function runAgentStream(
     const acpModel = extractModelFromCmdArgs(cmdArgs);
     let args = acpArgsWithWorkspace(config.acpArgs, workspaceDir);
     args = acpModel ? acpArgsWithModel(args, acpModel) : args;
-    const acpEnv = config.acpEnv;
+    const acpEnv = { ...config.acpEnv };
+    if (config.chatOnlyWorkspace) {
+      acpEnv.CURSOR_CONFIG_DIR = path.join(workspaceDir, ".cursor");
+      acpEnv.HOME = workspaceDir;
+      acpEnv.USERPROFILE = workspaceDir;
+    }
     return runAcpStream(
       config.acpCommand,
       args,
@@ -117,12 +137,21 @@ export function runAgentStream(
       return result;
     });
   }
+  const streamEnvOverrides =
+    config.chatOnlyWorkspace
+      ? {
+          CURSOR_CONFIG_DIR: path.join(workspaceDir, ".cursor"),
+          HOME: workspaceDir,
+          USERPROFILE: workspaceDir,
+        }
+      : undefined;
   return runStreaming(config.agentBin, cmdArgs, {
     cwd: workspaceDir,
     timeoutMs: config.timeoutMs,
     maxMode: config.maxMode,
     onLine,
     stdinContent: stdinPrompt,
+    envOverrides: streamEnvOverrides,
   }).then((result) => {
     if (tempDir) {
       try {
