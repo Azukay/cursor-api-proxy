@@ -38,17 +38,38 @@ export type BridgeConfig = {
   useAcp: boolean;
   /** Spawn options for ACP (e.g. windowsVerbatimArguments when using cmd.exe fallback). */
   acpSpawnOptions?: { windowsVerbatimArguments?: boolean };
+  /** When true, skip ACP authenticate step (use when pre-authenticated via --api-key or agent login). */
+  acpSkipAuthenticate: boolean;
 };
+
+function acpArgsWithApiKey(
+  args: string[],
+  apiKey: string | undefined,
+): string[] {
+  if (!apiKey?.trim()) return args;
+  const i = args.indexOf("acp");
+  if (i === -1) return args;
+  return [...args.slice(0, i), "--api-key", apiKey.trim(), ...args.slice(i)];
+}
 
 export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
   const env = loadEnvConfig(opts);
   const acpResolved = resolveAgentCommand(env.agentBin, ["acp"], opts);
+  const envSource = opts.env ?? process.env;
+  const apiKey = envSource.CURSOR_API_KEY ?? envSource.CURSOR_AUTH_TOKEN;
+  const acpArgs = acpArgsWithApiKey(acpResolved.args, apiKey);
+
+  const acpEnv = { ...acpResolved.env } as Record<string, string | undefined>;
+  if (apiKey) {
+    acpEnv.CURSOR_API_KEY = apiKey;
+    acpEnv.CURSOR_AUTH_TOKEN = apiKey;
+  }
 
   return {
     agentBin: env.agentBin,
     acpCommand: acpResolved.command,
-    acpArgs: acpResolved.args,
-    acpEnv: acpResolved.env as Record<string, string | undefined>,
+    acpArgs,
+    acpEnv,
     host: env.host,
     port: env.port,
     requiredKey: env.requiredKey,
@@ -71,5 +92,10 @@ export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
       acpResolved.windowsVerbatimArguments != null
         ? { windowsVerbatimArguments: acpResolved.windowsVerbatimArguments }
         : undefined,
+    acpSkipAuthenticate:
+      !!apiKey ||
+      /^(1|true|yes|on)$/i.test(
+        String(envSource.CURSOR_BRIDGE_ACP_SKIP_AUTHENTICATE ?? "").trim(),
+      ),
   };
 }

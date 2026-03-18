@@ -20,6 +20,8 @@ export type AcpRunOptions = {
   requestTimeoutMs?: number;
   /** Spawn options (e.g. windowsVerbatimArguments for cmd.exe fallback on Windows). */
   spawnOptions?: { windowsVerbatimArguments?: boolean };
+  /** When true, skip authenticate step (use when pre-authenticated via --api-key or agent login). */
+  skipAuthenticate?: boolean;
 };
 
 export type AcpSyncResult = {
@@ -138,7 +140,7 @@ export function runAcpSync(
     const nextId = { current: 1 };
     const pending = new Map<
       number,
-      { resolve: (value: unknown) => void; reject: (err: Error) => void }
+      { resolve: (value: unknown) => void; reject: (err: Error) => void; timerId?: ReturnType<typeof setTimeout> }
     >();
 
     const rl = readline.createInterface({ input: child.stdout! });
@@ -172,6 +174,21 @@ export function runAcpSync(
             typeof update.content?.text === "string"
           ) {
             accumulated += update.content.text;
+          } else if (
+            update?.sessionUpdate &&
+            update.sessionUpdate !== "agent_thought_chunk" &&
+            update.sessionUpdate !== "available_commands_update" &&
+            update.sessionUpdate !== "tool_call" &&
+            update.sessionUpdate !== "tool_call_update"
+          ) {
+            debugAcp(
+              "session/update (unhandled): %s",
+              JSON.stringify({
+                sessionUpdate: update.sessionUpdate,
+                hasContent: !!update.content,
+                contentKeys: update.content ? Object.keys(update.content) : [],
+              }),
+            );
           }
           return;
         }
@@ -208,6 +225,7 @@ export function runAcpSync(
         return;
       }
       try {
+        debugAcp("ACP step: initialize");
         await sendRequest(child.stdin, nextId, "initialize", {
           protocolVersion: 1,
           clientCapabilities: {
@@ -217,10 +235,16 @@ export function runAcpSync(
           clientInfo: { name: "cursor-api-proxy", version: "0.1.0" },
         }, pending, requestTimeoutMs);
 
-        await sendRequest(child.stdin, nextId, "authenticate", {
-          methodId: "cursor_login",
-        }, pending, requestTimeoutMs);
+        if (!opts.skipAuthenticate) {
+          debugAcp("ACP step: authenticate");
+          await sendRequest(child.stdin, nextId, "authenticate", {
+            methodId: "cursor_login",
+          }, pending, requestTimeoutMs);
+        } else {
+          debugAcp("ACP step: authenticate (skipped, pre-authenticated)");
+        }
 
+        debugAcp("ACP step: session/new");
         const sessionResult = (await sendRequest(
           child.stdin,
           nextId,
@@ -235,21 +259,7 @@ export function runAcpSync(
           return;
         }
 
-        if (opts.model) {
-          try {
-            await sendRequest(child.stdin, nextId, "session/set_config_option", {
-              sessionId,
-              configId: "model",
-              value: opts.model,
-            }, pending, requestTimeoutMs);
-          } catch (e) {
-            debugAcp(
-              "session/set_config_option failed (continuing): %s",
-              e instanceof Error ? e.message : String(e),
-            );
-          }
-        }
-
+        debugAcp("ACP step: session/prompt");
         await sendRequest(child.stdin, nextId, "session/prompt", {
           sessionId,
           prompt: [{ type: "text", text: prompt }],
@@ -354,6 +364,21 @@ export function runAcpStream(
             typeof update.content?.text === "string"
           ) {
             onChunk(update.content.text);
+          } else if (
+            update?.sessionUpdate &&
+            update.sessionUpdate !== "agent_thought_chunk" &&
+            update.sessionUpdate !== "available_commands_update" &&
+            update.sessionUpdate !== "tool_call" &&
+            update.sessionUpdate !== "tool_call_update"
+          ) {
+            debugAcp(
+              "session/update (unhandled): %s",
+              JSON.stringify({
+                sessionUpdate: update.sessionUpdate,
+                hasContent: !!update.content,
+                contentKeys: update.content ? Object.keys(update.content) : [],
+              }),
+            );
           }
           return;
         }
@@ -390,6 +415,7 @@ export function runAcpStream(
         return;
       }
       try {
+        debugAcp("ACP step: initialize");
         await sendRequest(child.stdin, nextId, "initialize", {
           protocolVersion: 1,
           clientCapabilities: {
@@ -399,10 +425,16 @@ export function runAcpStream(
           clientInfo: { name: "cursor-api-proxy", version: "0.1.0" },
         }, pending, requestTimeoutMs);
 
-        await sendRequest(child.stdin, nextId, "authenticate", {
-          methodId: "cursor_login",
-        }, pending, requestTimeoutMs);
+        if (!opts.skipAuthenticate) {
+          debugAcp("ACP step: authenticate");
+          await sendRequest(child.stdin, nextId, "authenticate", {
+            methodId: "cursor_login",
+          }, pending, requestTimeoutMs);
+        } else {
+          debugAcp("ACP step: authenticate (skipped, pre-authenticated)");
+        }
 
+        debugAcp("ACP step: session/new");
         const sessionResult = (await sendRequest(
           child.stdin,
           nextId,
@@ -417,21 +449,7 @@ export function runAcpStream(
           return;
         }
 
-        if (opts.model) {
-          try {
-            await sendRequest(child.stdin, nextId, "session/set_config_option", {
-              sessionId,
-              configId: "model",
-              value: opts.model,
-            }, pending, requestTimeoutMs);
-          } catch (e) {
-            debugAcp(
-              "session/set_config_option failed (continuing): %s",
-              e instanceof Error ? e.message : String(e),
-            );
-          }
-        }
-
+        debugAcp("ACP step: session/prompt");
         await sendRequest(child.stdin, nextId, "session/prompt", {
           sessionId,
           prompt: [{ type: "text", text: prompt }],

@@ -15,6 +15,18 @@ export function resolveWorkspace(
 ): WorkspaceResult {
   if (config.chatOnlyWorkspace) {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cursor-proxy-"));
+    const cursorDir = path.join(tempDir, ".cursor");
+    fs.mkdirSync(cursorDir, { recursive: true });
+    const minimalConfig = {
+      version: 1,
+      editor: { vimMode: false },
+      permissions: { allow: [], deny: [] },
+    };
+    fs.writeFileSync(
+      path.join(cursorDir, "cli-config.json"),
+      JSON.stringify(minimalConfig, null, 0),
+      "utf8",
+    );
     return { workspaceDir: tempDir, tempDir };
   }
   const headerWs =

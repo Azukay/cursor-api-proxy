@@ -16,6 +16,12 @@ function acpArgsWithModel(acpArgs: string[], model: string): string[] {
   return [...acpArgs.slice(0, i + 1), "--model", model, ...acpArgs.slice(i + 1)];
 }
 
+function acpArgsWithWorkspace(acpArgs: string[], workspaceDir: string): string[] {
+  const i = acpArgs.indexOf("acp");
+  if (i === -1) return acpArgs;
+  return [...acpArgs.slice(0, i), "--workspace", workspaceDir, ...acpArgs.slice(i)];
+}
+
 function extractModelFromCmdArgs(cmdArgs: string[]): string | undefined {
   const i = cmdArgs.indexOf("--model");
   return i >= 0 && i + 1 < cmdArgs.length ? cmdArgs[i + 1] : undefined;
@@ -30,14 +36,17 @@ export function runAgentSync(
 ): Promise<AgentRunResult> {
   if (config.useAcp && typeof stdinPrompt === "string") {
     const acpModel = extractModelFromCmdArgs(cmdArgs);
-    const args = acpModel ? acpArgsWithModel(config.acpArgs, acpModel) : config.acpArgs;
+    let args = acpArgsWithWorkspace(config.acpArgs, workspaceDir);
+    args = acpModel ? acpArgsWithModel(args, acpModel) : args;
+    const acpEnv = config.acpEnv;
     return runAcpSync(config.acpCommand, args, stdinPrompt, {
       cwd: workspaceDir,
       timeoutMs: config.timeoutMs,
-      env: config.acpEnv,
+      env: acpEnv,
       model: acpModel,
       requestTimeoutMs: 60_000,
       spawnOptions: config.acpSpawnOptions,
+      skipAuthenticate: config.acpSkipAuthenticate,
     }).then((out) => {
       if (tempDir) {
         try {
@@ -78,7 +87,9 @@ export function runAgentStream(
 ): Promise<{ code: number; stderr: string }> {
   if (config.useAcp && typeof stdinPrompt === "string") {
     const acpModel = extractModelFromCmdArgs(cmdArgs);
-    const args = acpModel ? acpArgsWithModel(config.acpArgs, acpModel) : config.acpArgs;
+    let args = acpArgsWithWorkspace(config.acpArgs, workspaceDir);
+    args = acpModel ? acpArgsWithModel(args, acpModel) : args;
+    const acpEnv = config.acpEnv;
     return runAcpStream(
       config.acpCommand,
       args,
@@ -86,10 +97,11 @@ export function runAgentStream(
       {
         cwd: workspaceDir,
         timeoutMs: config.timeoutMs,
-        env: config.acpEnv,
+        env: acpEnv,
         model: acpModel,
         requestTimeoutMs: 60_000,
         spawnOptions: config.acpSpawnOptions,
+        skipAuthenticate: config.acpSkipAuthenticate,
       },
       onLine,
     ).then((result) => {

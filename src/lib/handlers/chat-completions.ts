@@ -87,7 +87,7 @@ export async function handleChatCompletions(
       runAgentStream(
         config,
         workspaceDir,
-        [],
+        cmdArgs,
         (chunk) => {
           accumulated += chunk;
           res.write(
