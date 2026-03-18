@@ -44,6 +44,9 @@ const tmpLogPath = "/tmp/cursor-proxy-test-sessions.log";
 function createTestConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig {
   return {
     agentBin: "agent",
+    acpCommand: "agent",
+    acpArgs: ["acp"],
+    acpEnv: {},
     host: "127.0.0.1",
     port: 0, // Let OS assign a free port
     defaultModel: "auto",

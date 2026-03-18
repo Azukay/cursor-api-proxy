@@ -6,11 +6,20 @@
 
 import * as readline from "node:readline";
 import { spawn } from "node:child_process";
+import { debuglog } from "node:util";
+
+const debugAcp = debuglog("cursor-api-proxy:acp");
 
 export type AcpRunOptions = {
   cwd: string;
   timeoutMs: number;
   env?: Record<string, string | undefined>;
+  /** When set, call session/set_config_option for "model" after session/new (ACP session config). */
+  model?: string;
+  /** Per-request timeout in ms (default 60000). Rejects and clears pending on timeout. */
+  requestTimeoutMs?: number;
+  /** Spawn options (e.g. windowsVerbatimArguments for cmd.exe fallback on Windows). */
+  spawnOptions?: { windowsVerbatimArguments?: boolean };
 };
 
 export type AcpSyncResult = {
@@ -24,6 +33,8 @@ export type AcpStreamResult = {
   stderr: string;
 };
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
 function sendRequest(
   stdin: NodeJS.WritableStream,
   nextId: { current: number },
@@ -31,15 +42,35 @@ function sendRequest(
   params: object,
   pending: Map<
     number,
-    { resolve: (value: unknown) => void; reject: (err: Error) => void }
+    { resolve: (value: unknown) => void; reject: (err: Error) => void; timerId?: ReturnType<typeof setTimeout> }
   >,
+  requestTimeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
 ): Promise<unknown> {
   const id = nextId.current++;
   const line =
     JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
   stdin.write(line, "utf8");
   return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    if (requestTimeoutMs > 0) {
+      timerId = setTimeout(() => {
+        if (pending.has(id)) {
+          pending.delete(id);
+          reject(new Error(`ACP ${method} timed out after ${requestTimeoutMs}ms`));
+        }
+      }, requestTimeoutMs);
+    }
+    pending.set(id, {
+      resolve: (v) => {
+        if (timerId) clearTimeout(timerId);
+        resolve(v);
+      },
+      reject: (e) => {
+        if (timerId) clearTimeout(timerId);
+        reject(e);
+      },
+      timerId,
+    });
   });
 }
 
@@ -50,17 +81,22 @@ function respond(stdin: NodeJS.WritableStream, id: number, result: object): void
 
 /**
  * Run a single prompt via ACP and return the full response (sync).
+ * Uses pre-resolved command + args (e.g. node + script on Windows) to avoid spawn EINVAL and DEP0190.
  */
 export function runAcpSync(
-  agentBin: string,
+  command: string,
+  args: string[],
   prompt: string,
   opts: AcpRunOptions,
 ): Promise<AcpSyncResult> {
+  const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+
   return new Promise((resolve, reject) => {
-    const child = spawn(agentBin, ["acp"], {
+    const child = spawn(command, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],
+      windowsVerbatimArguments: opts.spawnOptions?.windowsVerbatimArguments,
     });
 
     let stderr = "";
@@ -72,7 +108,7 @@ export function runAcpSync(
       resolved = true;
       try {
         child.stdin?.end();
-        child.kill();
+        child.kill("SIGKILL");
       } catch {
         /* ignore */
       }
@@ -173,11 +209,11 @@ export function runAcpSync(
             terminal: false,
           },
           clientInfo: { name: "cursor-api-proxy", version: "0.1.0" },
-        }, pending);
+        }, pending, requestTimeoutMs);
 
         await sendRequest(child.stdin, nextId, "authenticate", {
           methodId: "cursor_login",
-        }, pending);
+        }, pending, requestTimeoutMs);
 
         const sessionResult = (await sendRequest(
           child.stdin,
@@ -185,6 +221,7 @@ export function runAcpSync(
           "session/new",
           { cwd: opts.cwd, mcpServers: [] },
           pending,
+          requestTimeoutMs,
         )) as { sessionId?: string };
         const sessionId = sessionResult?.sessionId;
         if (!sessionId) {
@@ -192,10 +229,25 @@ export function runAcpSync(
           return;
         }
 
+        if (opts.model) {
+          try {
+            await sendRequest(child.stdin, nextId, "session/set_config_option", {
+              sessionId,
+              configId: "model",
+              value: opts.model,
+            }, pending, requestTimeoutMs);
+          } catch (e) {
+            debugAcp(
+              "session/set_config_option failed (continuing): %s",
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+        }
+
         await sendRequest(child.stdin, nextId, "session/prompt", {
           sessionId,
           prompt: [{ type: "text", text: prompt }],
-        }, pending);
+        }, pending, requestTimeoutMs);
         finish(0);
       } catch {
         if (timeout) clearTimeout(timeout);
@@ -214,16 +266,20 @@ export function runAcpSync(
  * Run a single prompt via ACP and stream response chunks via onChunk.
  */
 export function runAcpStream(
-  agentBin: string,
+  command: string,
+  args: string[],
   prompt: string,
   opts: AcpRunOptions,
   onChunk: (text: string) => void,
 ): Promise<AcpStreamResult> {
+  const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+
   return new Promise((resolve, reject) => {
-    const child = spawn(agentBin, ["acp"], {
+    const child = spawn(command, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],
+      windowsVerbatimArguments: opts.spawnOptions?.windowsVerbatimArguments,
     });
 
     let stderr = "";
@@ -234,7 +290,7 @@ export function runAcpStream(
       resolved = true;
       try {
         child.stdin?.end();
-        child.kill();
+        child.kill("SIGKILL");
       } catch {
         /* ignore */
       }
@@ -329,11 +385,11 @@ export function runAcpStream(
             terminal: false,
           },
           clientInfo: { name: "cursor-api-proxy", version: "0.1.0" },
-        }, pending);
+        }, pending, requestTimeoutMs);
 
         await sendRequest(child.stdin, nextId, "authenticate", {
           methodId: "cursor_login",
-        }, pending);
+        }, pending, requestTimeoutMs);
 
         const sessionResult = (await sendRequest(
           child.stdin,
@@ -341,6 +397,7 @@ export function runAcpStream(
           "session/new",
           { cwd: opts.cwd, mcpServers: [] },
           pending,
+          requestTimeoutMs,
         )) as { sessionId?: string };
         const sessionId = sessionResult?.sessionId;
         if (!sessionId) {
@@ -348,10 +405,25 @@ export function runAcpStream(
           return;
         }
 
+        if (opts.model) {
+          try {
+            await sendRequest(child.stdin, nextId, "session/set_config_option", {
+              sessionId,
+              configId: "model",
+              value: opts.model,
+            }, pending, requestTimeoutMs);
+          } catch (e) {
+            debugAcp(
+              "session/set_config_option failed (continuing): %s",
+              e instanceof Error ? e.message : String(e),
+            );
+          }
+        }
+
         await sendRequest(child.stdin, nextId, "session/prompt", {
           sessionId,
           prompt: [{ type: "text", text: prompt }],
-        }, pending);
+        }, pending, requestTimeoutMs);
         finish(0);
       } catch {
         if (timeout) clearTimeout(timeout);

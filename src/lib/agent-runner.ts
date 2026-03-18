@@ -10,6 +10,17 @@ export type AgentRunResult = {
   stderr: string;
 };
 
+function acpArgsWithModel(acpArgs: string[], model: string): string[] {
+  const i = acpArgs.indexOf("acp");
+  if (i === -1) return acpArgs;
+  return [...acpArgs.slice(0, i + 1), "--model", model, ...acpArgs.slice(i + 1)];
+}
+
+function extractModelFromCmdArgs(cmdArgs: string[]): string | undefined {
+  const i = cmdArgs.indexOf("--model");
+  return i >= 0 && i + 1 < cmdArgs.length ? cmdArgs[i + 1] : undefined;
+}
+
 export function runAgentSync(
   config: BridgeConfig,
   workspaceDir: string,
@@ -18,9 +29,15 @@ export function runAgentSync(
   stdinPrompt?: string,
 ): Promise<AgentRunResult> {
   if (config.useAcp && typeof stdinPrompt === "string") {
-    return runAcpSync(config.agentBin, stdinPrompt, {
+    const acpModel = extractModelFromCmdArgs(cmdArgs);
+    const args = acpModel ? acpArgsWithModel(config.acpArgs, acpModel) : config.acpArgs;
+    return runAcpSync(config.acpCommand, args, stdinPrompt, {
       cwd: workspaceDir,
       timeoutMs: config.timeoutMs,
+      env: config.acpEnv,
+      model: acpModel,
+      requestTimeoutMs: 60_000,
+      spawnOptions: config.acpSpawnOptions,
     }).then((out) => {
       if (tempDir) {
         try {
@@ -60,10 +77,20 @@ export function runAgentStream(
   stdinPrompt?: string,
 ): Promise<{ code: number; stderr: string }> {
   if (config.useAcp && typeof stdinPrompt === "string") {
+    const acpModel = extractModelFromCmdArgs(cmdArgs);
+    const args = acpModel ? acpArgsWithModel(config.acpArgs, acpModel) : config.acpArgs;
     return runAcpStream(
-      config.agentBin,
+      config.acpCommand,
+      args,
       stdinPrompt,
-      { cwd: workspaceDir, timeoutMs: config.timeoutMs },
+      {
+        cwd: workspaceDir,
+        timeoutMs: config.timeoutMs,
+        env: config.acpEnv,
+        model: acpModel,
+        requestTimeoutMs: 60_000,
+        spawnOptions: config.acpSpawnOptions,
+      },
       onLine,
     ).then((result) => {
       if (tempDir) {

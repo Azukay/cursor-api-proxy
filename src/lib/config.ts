@@ -1,9 +1,15 @@
-import { loadEnvConfig, type EnvOptions } from "./env.js";
+import { loadEnvConfig, resolveAgentCommand, type EnvOptions } from "./env.js";
 
 export type CursorExecutionMode = "agent" | "ask" | "plan";
 
 export type BridgeConfig = {
   agentBin: string;
+  /** Resolved command for ACP (node + script on Windows when .cmd); avoids spawn EINVAL and DEP0190. */
+  acpCommand: string;
+  /** Args for ACP (e.g. [scriptPath, "acp"] or ["acp"]). */
+  acpArgs: string[];
+  /** Env to use when spawning ACP (e.g. CURSOR_INVOKED_AS). */
+  acpEnv: Record<string, string | undefined>;
   host: string;
   port: number;
   requiredKey?: string;
@@ -30,13 +36,19 @@ export type BridgeConfig = {
   promptViaStdin: boolean;
   /** When true, use ACP (Agent Client Protocol) over stdio; fixes prompt delivery on Windows. */
   useAcp: boolean;
+  /** Spawn options for ACP (e.g. windowsVerbatimArguments when using cmd.exe fallback). */
+  acpSpawnOptions?: { windowsVerbatimArguments?: boolean };
 };
 
 export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
   const env = loadEnvConfig(opts);
+  const acpResolved = resolveAgentCommand(env.agentBin, ["acp"], opts);
 
   return {
     agentBin: env.agentBin,
+    acpCommand: acpResolved.command,
+    acpArgs: acpResolved.args,
+    acpEnv: acpResolved.env as Record<string, string | undefined>,
     host: env.host,
     port: env.port,
     requiredKey: env.requiredKey,
@@ -55,5 +67,9 @@ export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
     maxMode: env.maxMode,
     promptViaStdin: env.promptViaStdin,
     useAcp: env.useAcp,
+    acpSpawnOptions:
+      acpResolved.windowsVerbatimArguments != null
+        ? { windowsVerbatimArguments: acpResolved.windowsVerbatimArguments }
+        : undefined,
   };
 }
