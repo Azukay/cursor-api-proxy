@@ -20,7 +20,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "cursor-api-proxy": "./dist/cli.js"
+    "cursor-api-proxy": "dist/cli.js"
   },
   "scripts": {
     "prepare": "tsc -p tsconfig.json",
