@@ -21,6 +21,7 @@ import {
 } from "../request-log.js";
 import { resolveModel } from "../resolve-model.js";
 import { resolveWorkspace } from "../workspace.js";
+import { sanitizePrompt } from "../sanitize.js";
 import {
   getNextAccountConfigDir,
   reportRequestStart,
@@ -57,7 +58,7 @@ export async function handleChatCompletions(
   const messagesWithTools = toolsText
     ? [{ role: "system", content: toolsText }, ...(body.messages ?? [])]
     : (body.messages ?? []);
-  const prompt = buildPromptFromMessages(messagesWithTools);
+  const prompt = sanitizePrompt(buildPromptFromMessages(messagesWithTools));
 
   const trafficMessages: TrafficMessage[] = (body.messages ?? []).map(
     (m: any) => {

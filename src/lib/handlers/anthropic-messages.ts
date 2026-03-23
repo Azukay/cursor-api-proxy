@@ -18,6 +18,7 @@ import {
 } from "../request-log.js";
 import { resolveModel } from "../resolve-model.js";
 import { resolveWorkspace } from "../workspace.js";
+import { sanitizePrompt } from "../sanitize.js";
 import {
   getNextAccountConfigDir,
   reportRequestStart,
@@ -53,9 +54,11 @@ export async function handleAnthropicMessages(
   const systemWithTools = toolsText
     ? [body.system, toolsText].filter(Boolean).join("\n\n")
     : body.system;
-  const prompt = buildPromptFromAnthropicMessages(
-    body.messages,
-    systemWithTools as AnthropicMessagesRequest["system"],
+  const prompt = sanitizePrompt(
+    buildPromptFromAnthropicMessages(
+      body.messages,
+      systemWithTools as AnthropicMessagesRequest["system"],
+    ),
   );
 
   if (body.max_tokens == null || typeof body.max_tokens !== "number") {
