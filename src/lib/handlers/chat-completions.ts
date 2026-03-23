@@ -21,7 +21,7 @@ import {
 } from "../request-log.js";
 import { resolveModel } from "../resolve-model.js";
 import { resolveWorkspace } from "../workspace.js";
-import { sanitizePrompt } from "../sanitize.js";
+import { sanitizeMessages } from "../sanitize.js";
 import {
   getNextAccountConfigDir,
   reportRequestStart,
@@ -53,27 +53,27 @@ export async function handleChatCompletions(
   const model = resolveModel(requested, lastRequestedModelRef, config);
   const cursorModel = resolveToCursorModel(model) ?? model;
 
+  const cleanMessages = sanitizeMessages(body.messages ?? []);
+
   // Inject tool/function schemas as a system message so the model is aware of them
   const toolsText = toolsToSystemText(body.tools, body.functions);
   const messagesWithTools = toolsText
-    ? [{ role: "system", content: toolsText }, ...(body.messages ?? [])]
-    : (body.messages ?? []);
-  const prompt = sanitizePrompt(buildPromptFromMessages(messagesWithTools));
+    ? [{ role: "system", content: toolsText }, ...cleanMessages]
+    : cleanMessages;
+  const prompt = buildPromptFromMessages(messagesWithTools);
 
-  const trafficMessages: TrafficMessage[] = (body.messages ?? []).map(
-    (m: any) => {
-      const content =
-        typeof m?.content === "string"
-          ? m.content
-          : Array.isArray(m?.content)
-            ? (m.content as Array<{ type?: string; text?: string }>)
-                .filter((p) => p.type === "text")
-                .map((p) => p.text ?? "")
-                .join("")
-            : "";
-      return { role: String(m?.role ?? "user"), content };
-    },
-  );
+  const trafficMessages: TrafficMessage[] = cleanMessages.map((m: any) => {
+    const content =
+      typeof m?.content === "string"
+        ? m.content
+        : Array.isArray(m?.content)
+          ? (m.content as Array<{ type?: string; text?: string }>)
+              .filter((p) => p.type === "text")
+              .map((p) => p.text ?? "")
+              .join("")
+          : "";
+    return { role: String(m?.role ?? "user"), content };
+  });
   logTrafficRequest(
     config.verbose,
     model ?? cursorModel,

@@ -25,13 +25,57 @@ const RULES: Array<[RegExp, string]> = [
 ];
 
 /**
- * Apply all sanitization rules to a prompt string.
+ * Apply all sanitization rules to a string.
  * Safe to call with any string; returns the original value if nothing matched.
  */
-export function sanitizePrompt(prompt: string): string {
-  let s = prompt;
+export function sanitizeText(text: string): string {
+  let s = text;
   for (const [pattern, replacement] of RULES) {
     s = s.replace(pattern, replacement);
   }
   return s;
+}
+
+/** Alias kept for backwards compat. */
+export const sanitizePrompt = sanitizeText;
+
+/**
+ * Sanitize an OpenAI-style messages array in place (returns a new array).
+ * Handles both string and array content parts.
+ */
+export function sanitizeMessages(messages: any[]): any[] {
+  return (messages ?? []).map((m: any) => {
+    if (!m) return m;
+    if (typeof m.content === "string") {
+      return { ...m, content: sanitizeText(m.content) };
+    }
+    if (Array.isArray(m.content)) {
+      return {
+        ...m,
+        content: m.content.map((p: any) => {
+          if (p?.type === "text" && typeof p.text === "string") {
+            return { ...p, text: sanitizeText(p.text) };
+          }
+          return p;
+        }),
+      };
+    }
+    return m;
+  });
+}
+
+/**
+ * Sanitize an Anthropic-style system field (string or content-block array).
+ */
+export function sanitizeSystem(system: any): any {
+  if (typeof system === "string") return sanitizeText(system);
+  if (Array.isArray(system)) {
+    return system.map((p: any) => {
+      if (p?.type === "text" && typeof p.text === "string") {
+        return { ...p, text: sanitizeText(p.text) };
+      }
+      return p;
+    });
+  }
+  return system;
 }

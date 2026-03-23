@@ -18,7 +18,7 @@ import {
 } from "../request-log.js";
 import { resolveModel } from "../resolve-model.js";
 import { resolveWorkspace } from "../workspace.js";
-import { sanitizePrompt } from "../sanitize.js";
+import { sanitizeMessages, sanitizeSystem } from "../sanitize.js";
 import {
   getNextAccountConfigDir,
   reportRequestStart,
@@ -49,16 +49,19 @@ export async function handleAnthropicMessages(
   const requested = normalizeModelId(body.model);
   const model = resolveModel(requested, lastRequestedModelRef, config);
 
+  const cleanSystem = sanitizeSystem(body.system);
+  const cleanMessages = sanitizeMessages(
+    body.messages ?? [],
+  ) as AnthropicMessagesRequest["messages"];
+
   // Inject Anthropic tool schemas as a system text block
   const toolsText = toolsToSystemText((body as any).tools);
   const systemWithTools = toolsText
-    ? [body.system, toolsText].filter(Boolean).join("\n\n")
-    : body.system;
-  const prompt = sanitizePrompt(
-    buildPromptFromAnthropicMessages(
-      body.messages,
-      systemWithTools as AnthropicMessagesRequest["system"],
-    ),
+    ? [cleanSystem, toolsText].filter(Boolean).join("\n\n")
+    : cleanSystem;
+  const prompt = buildPromptFromAnthropicMessages(
+    cleanMessages,
+    systemWithTools as AnthropicMessagesRequest["system"],
   );
 
   if (body.max_tokens == null || typeof body.max_tokens !== "number") {
@@ -74,18 +77,18 @@ export async function handleAnthropicMessages(
   const cursorModel = resolveToCursorModel(model) ?? model;
 
   const trafficMessages: TrafficMessage[] = [];
-  if (body.system) {
+  if (cleanSystem) {
     const sys =
-      typeof body.system === "string"
-        ? body.system
-        : (body.system as Array<{ type?: string; text?: string }>)
+      typeof cleanSystem === "string"
+        ? cleanSystem
+        : (cleanSystem as Array<{ type?: string; text?: string }>)
             .filter((p) => p.type === "text")
             .map((p) => p.text ?? "")
             .join("\n");
     if (sys.trim())
       trafficMessages.push({ role: "system", content: sys.trim() });
   }
-  for (const m of body.messages ?? []) {
+  for (const m of cleanMessages) {
     const text =
       typeof m.content === "string"
         ? m.content
