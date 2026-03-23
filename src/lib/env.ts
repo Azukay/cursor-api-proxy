@@ -31,6 +31,10 @@ export type LoadedEnv = {
   verbose: boolean;
   /** When true, set maxMode in cli-config.json before each run (larger context, more tools). */
   maxMode: boolean;
+  /** Pool of cursor configuration directories for round-robin account rotation. */
+  configDirs: string[];
+  /** When true, runs each config dir on its own incrementing port starting from `port` */
+  multiPort: boolean;
 };
 
 export type AgentCommand = {
@@ -67,16 +71,26 @@ function envString(env: EnvSource, names: string[]): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-function envBool(env: EnvSource, names: string[], defaultValue: boolean): boolean {
+function envBool(
+  env: EnvSource,
+  names: string[],
+  defaultValue: boolean,
+): boolean {
   const raw = envString(env, names);
   if (raw == null) return defaultValue;
   const value = raw.toLowerCase();
-  if (value === "1" || value === "true" || value === "yes" || value === "on") return true;
-  if (value === "0" || value === "false" || value === "no" || value === "off") return false;
+  if (value === "1" || value === "true" || value === "yes" || value === "on")
+    return true;
+  if (value === "0" || value === "false" || value === "no" || value === "off")
+    return false;
   return defaultValue;
 }
 
-function envNumber(env: EnvSource, names: string[], defaultValue: number): number {
+function envNumber(
+  env: EnvSource,
+  names: string[],
+  defaultValue: number,
+): number {
   const raw = envString(env, names);
   if (raw == null) return defaultValue;
   const value = Number(raw);
@@ -89,18 +103,57 @@ function normalizeModelId(raw: string | undefined): string {
   return parts[parts.length - 1] || "auto";
 }
 
-function resolveAbsolutePath(raw: string | undefined, cwd: string): string | undefined {
+function resolveAbsolutePath(
+  raw: string | undefined,
+  cwd: string,
+): string | undefined {
   if (!raw) return undefined;
   return path.resolve(cwd, raw);
+}
+
+/**
+ * Auto-discovers configuration directories located inside ~/.cursor-api-proxy/accounts/
+ */
+function isAuthenticatedAccountDir(dir: string): boolean {
+  const configFile = path.join(dir, "cli-config.json");
+  if (!fs.existsSync(configFile)) return false;
+  try {
+    const config = JSON.parse(fs.readFileSync(configFile, "utf-8")) as {
+      authInfo?: { email?: string };
+    };
+    return Boolean(config?.authInfo?.email);
+  } catch {
+    return false;
+  }
+}
+
+function discoverAccountDirs(homeDir: string | undefined): string[] {
+  if (!homeDir) return [];
+  const accountsDir = path.join(homeDir, ".cursor-api-proxy", "accounts");
+  if (!fs.existsSync(accountsDir)) return [];
+
+  try {
+    const entries = fs.readdirSync(accountsDir, { withFileTypes: true });
+    return entries
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(accountsDir, e.name))
+      .filter(isAuthenticatedAccountDir);
+  } catch {
+    return [];
+  }
 }
 
 export function loadEnvConfig(opts: EnvOptions = {}): LoadedEnv {
   const env = getEnvSource(opts.env);
   const cwd = getCwd(opts.cwd);
 
-  const host = envString(env, ["CURSOR_BRIDGE_HOST"]) ?? (opts.tailscale ? "0.0.0.0" : "127.0.0.1");
+  const host =
+    envString(env, ["CURSOR_BRIDGE_HOST"]) ??
+    (opts.tailscale ? "0.0.0.0" : "127.0.0.1");
   const portValue = envNumber(env, ["CURSOR_BRIDGE_PORT"], 8765);
   const port = Number.isFinite(portValue) && portValue > 0 ? portValue : 8765;
+
+  const home = envString(env, ["HOME", "USERPROFILE"]);
 
   const sessionsLogPath = (() => {
     const explicit = resolveAbsolutePath(
@@ -108,35 +161,69 @@ export function loadEnvConfig(opts: EnvOptions = {}): LoadedEnv {
       cwd,
     );
     if (explicit) return explicit;
-
-    const home = envString(env, ["HOME", "USERPROFILE"]);
     if (home) return path.join(home, ".cursor-api-proxy", "sessions.log");
-
     return path.join(cwd, "sessions.log");
   })();
 
+  const force = envBool(env, ["CURSOR_BRIDGE_FORCE"], false);
+
+  const rawConfigDirs = envString(env, [
+    "CURSOR_CONFIG_DIRS",
+    "CURSOR_ACCOUNT_DIRS",
+  ]);
+
+  let configDirs = rawConfigDirs
+    ? rawConfigDirs
+        .split(",")
+        .map((d) => resolveAbsolutePath(d.trim(), cwd))
+        .filter((d): d is string => d !== undefined)
+    : [];
+
+  if (configDirs.length === 0) {
+    configDirs = discoverAccountDirs(home);
+  }
+
   return {
     agentBin:
-      envString(env, ["CURSOR_AGENT_BIN", "CURSOR_CLI_BIN", "CURSOR_CLI_PATH"]) ?? "agent",
+      envString(env, [
+        "CURSOR_AGENT_BIN",
+        "CURSOR_CLI_BIN",
+        "CURSOR_CLI_PATH",
+      ]) ?? "agent",
     agentNode: envString(env, ["CURSOR_AGENT_NODE"]),
     agentScript: envString(env, ["CURSOR_AGENT_SCRIPT"]),
     commandShell: envString(env, ["COMSPEC"]) ?? "cmd.exe",
     host,
     port,
     requiredKey: envString(env, ["CURSOR_BRIDGE_API_KEY"]),
-    defaultModel: normalizeModelId(envString(env, ["CURSOR_BRIDGE_DEFAULT_MODEL"])),
-    force: envBool(env, ["CURSOR_BRIDGE_FORCE"], false),
+    defaultModel: normalizeModelId(
+      envString(env, ["CURSOR_BRIDGE_DEFAULT_MODEL"]),
+    ),
+    force,
     approveMcps: envBool(env, ["CURSOR_BRIDGE_APPROVE_MCPS"], false),
     strictModel: envBool(env, ["CURSOR_BRIDGE_STRICT_MODEL"], true),
     workspace:
-      resolveAbsolutePath(envString(env, ["CURSOR_BRIDGE_WORKSPACE"]), cwd) ?? cwd,
+      resolveAbsolutePath(envString(env, ["CURSOR_BRIDGE_WORKSPACE"]), cwd) ??
+      cwd,
     timeoutMs: envNumber(env, ["CURSOR_BRIDGE_TIMEOUT_MS"], 300_000),
-    tlsCertPath: resolveAbsolutePath(envString(env, ["CURSOR_BRIDGE_TLS_CERT"]), cwd),
-    tlsKeyPath: resolveAbsolutePath(envString(env, ["CURSOR_BRIDGE_TLS_KEY"]), cwd),
+    tlsCertPath: resolveAbsolutePath(
+      envString(env, ["CURSOR_BRIDGE_TLS_CERT"]),
+      cwd,
+    ),
+    tlsKeyPath: resolveAbsolutePath(
+      envString(env, ["CURSOR_BRIDGE_TLS_KEY"]),
+      cwd,
+    ),
     sessionsLogPath,
-    chatOnlyWorkspace: envBool(env, ["CURSOR_BRIDGE_CHAT_ONLY_WORKSPACE"], true),
+    chatOnlyWorkspace: envBool(
+      env,
+      ["CURSOR_BRIDGE_CHAT_ONLY_WORKSPACE"],
+      true,
+    ),
     verbose: envBool(env, ["CURSOR_BRIDGE_VERBOSE"], false),
     maxMode: envBool(env, ["CURSOR_BRIDGE_MAX_MODE"], false),
+    configDirs,
+    multiPort: envBool(env, ["CURSOR_BRIDGE_MULTI_PORT"], false),
   };
 }
 
@@ -162,7 +249,9 @@ export function resolveAgentCommand(
         args: [loaded.agentScript, ...args],
         env: { ...env, CURSOR_INVOKED_AS: "agent.cmd" },
         agentScriptPath,
-        configDir: fs.existsSync(path.join(configDir, "cli-config.json")) ? configDir : undefined,
+        configDir: fs.existsSync(path.join(configDir, "cli-config.json"))
+          ? configDir
+          : undefined,
       };
       return out;
     }
@@ -179,10 +268,14 @@ export function resolveAgentCommand(
           args: [script, ...args],
           env: { ...env, CURSOR_INVOKED_AS: "agent.cmd" },
           agentScriptPath: script,
-          configDir: fs.existsSync(path.join(configDir, "cli-config.json")) ? configDir : undefined,
+          configDir: fs.existsSync(path.join(configDir, "cli-config.json"))
+            ? configDir
+            : undefined,
         };
       }
-      const quotedArgs = args.map((arg) => (arg.includes(" ") ? `"${arg}"` : arg)).join(" ");
+      const quotedArgs = args
+        .map((arg) => (arg.includes(" ") ? `"${arg}"` : arg))
+        .join(" ");
       const cmdLine = `""${cmd}" ${quotedArgs}"`;
       return {
         command: loaded.commandShell,

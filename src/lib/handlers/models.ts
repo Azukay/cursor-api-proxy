@@ -12,7 +12,7 @@ export type ModelCache = { at: number; models: CursorCliModel[] };
 
 export type HandleModelsOpts = {
   config: BridgeConfig;
-  modelCacheRef: { current?: ModelCache };
+  modelCacheRef: { current?: ModelCache; inflight?: Promise<CursorCliModel[]> };
 };
 
 export async function handleModels(
@@ -25,28 +25,41 @@ export async function handleModels(
     !modelCacheRef.current ||
     now - modelCacheRef.current.at > MODEL_CACHE_TTL_MS
   ) {
-    const models = await listCursorCliModels({
-      agentBin: config.agentBin,
-      timeoutMs: 60_000,
-    });
-    modelCacheRef.current = { at: now, models };
+    // Deduplicate concurrent fetches — reuse a single in-flight promise
+    if (!modelCacheRef.inflight) {
+      modelCacheRef.inflight = listCursorCliModels({
+        agentBin: config.agentBin,
+        timeoutMs: 60_000,
+      }).then(
+        (models) => {
+          modelCacheRef.current = { at: Date.now(), models };
+          modelCacheRef.inflight = undefined;
+          return models;
+        },
+        (err) => {
+          modelCacheRef.inflight = undefined;
+          throw err;
+        },
+      );
+    }
+    await modelCacheRef.inflight;
   }
 
-  const models = modelCacheRef.current.models;
+  const models = modelCacheRef.current?.models ?? [];
   const cursorModels = models.map((m) => ({
     id: m.id,
     object: "model" as const,
     owned_by: "cursor" as const,
     name: m.name,
   }));
-  const anthropicAliases = getAnthropicModelAliases(models.map((m) => m.id)).map(
-    (a) => ({
-      id: a.id,
-      object: "model" as const,
-      owned_by: "cursor" as const,
-      name: a.name,
-    }),
-  );
+  const anthropicAliases = getAnthropicModelAliases(
+    models.map((m) => m.id),
+  ).map((a) => ({
+    id: a.id,
+    object: "model" as const,
+    owned_by: "cursor" as const,
+    name: a.name,
+  }));
 
   json(res, 200, {
     object: "list",

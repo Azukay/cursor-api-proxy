@@ -1,6 +1,8 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 
 import { loadEnvConfig, resolveAgentCommand } from "./env.js";
 
@@ -115,6 +117,177 @@ describe("loadEnvConfig", () => {
       }).host,
     ).toBe("10.0.0.5");
   });
+
+  it("parses CURSOR_CONFIG_DIRS as comma-separated absolute paths", () => {
+    const loaded = loadEnvConfig({
+      env: { CURSOR_CONFIG_DIRS: "/acc/a,/acc/b,/acc/c" },
+      cwd: "/workspace",
+    });
+    expect(loaded.configDirs).toEqual(["/acc/a", "/acc/b", "/acc/c"]);
+  });
+
+  it("CURSOR_ACCOUNT_DIRS is an alias for CURSOR_CONFIG_DIRS", () => {
+    const loaded = loadEnvConfig({
+      env: { CURSOR_ACCOUNT_DIRS: "/acc/x,/acc/y" },
+      cwd: "/workspace",
+    });
+    expect(loaded.configDirs).toEqual(["/acc/x", "/acc/y"]);
+  });
+
+  it("CURSOR_CONFIG_DIRS takes precedence over CURSOR_ACCOUNT_DIRS", () => {
+    const loaded = loadEnvConfig({
+      env: {
+        CURSOR_CONFIG_DIRS: "/primary/a",
+        CURSOR_ACCOUNT_DIRS: "/secondary/b",
+      },
+      cwd: "/workspace",
+    });
+    expect(loaded.configDirs).toEqual(["/primary/a"]);
+  });
+
+  it("trims whitespace from each dir in CURSOR_CONFIG_DIRS", () => {
+    const loaded = loadEnvConfig({
+      env: { CURSOR_CONFIG_DIRS: " /acc/a , /acc/b " },
+      cwd: "/workspace",
+    });
+    expect(loaded.configDirs).toEqual(["/acc/a", "/acc/b"]);
+  });
+
+  it("resolves relative dirs in CURSOR_CONFIG_DIRS against cwd", () => {
+    const loaded = loadEnvConfig({
+      env: { CURSOR_CONFIG_DIRS: "./accounts/a,./accounts/b" },
+      cwd: "/workspace",
+    });
+    expect(loaded.configDirs).toEqual([
+      "/workspace/accounts/a",
+      "/workspace/accounts/b",
+    ]);
+  });
+
+  it("returns empty configDirs when CURSOR_CONFIG_DIRS is unset and no accounts dir", () => {
+    const loaded = loadEnvConfig({
+      env: { HOME: "/nonexistent-home-" + Date.now() },
+      cwd: "/workspace",
+    });
+    expect(loaded.configDirs).toEqual([]);
+  });
+
+  it("multiPort defaults to false", () => {
+    const loaded = loadEnvConfig({ env: {}, cwd: "/workspace" });
+    expect(loaded.multiPort).toBe(false);
+  });
+
+  it("multiPort is parsed from CURSOR_BRIDGE_MULTI_PORT env var", () => {
+    expect(
+      loadEnvConfig({ env: { CURSOR_BRIDGE_MULTI_PORT: "true" } }).multiPort,
+    ).toBe(true);
+    expect(
+      loadEnvConfig({ env: { CURSOR_BRIDGE_MULTI_PORT: "1" } }).multiPort,
+    ).toBe(true);
+    expect(
+      loadEnvConfig({ env: { CURSOR_BRIDGE_MULTI_PORT: "false" } }).multiPort,
+    ).toBe(false);
+  });
+
+  it("falls back to default port 8765 for invalid CURSOR_BRIDGE_PORT", () => {
+    expect(
+      loadEnvConfig({ env: { CURSOR_BRIDGE_PORT: "not-a-number" } }).port,
+    ).toBe(8765);
+    expect(loadEnvConfig({ env: { CURSOR_BRIDGE_PORT: "0" } }).port).toBe(8765);
+    expect(loadEnvConfig({ env: { CURSOR_BRIDGE_PORT: "-1" } }).port).toBe(
+      8765,
+    );
+  });
+
+  it("maxMode defaults to false", () => {
+    expect(loadEnvConfig({ env: {} }).maxMode).toBe(false);
+  });
+
+  it("maxMode is parsed from CURSOR_BRIDGE_MAX_MODE", () => {
+    expect(
+      loadEnvConfig({ env: { CURSOR_BRIDGE_MAX_MODE: "true" } }).maxMode,
+    ).toBe(true);
+  });
+});
+
+describe("discoverAccountDirs filtering", () => {
+  let tmpBase: string;
+
+  afterEach(() => {
+    if (tmpBase) {
+      try {
+        fs.rmSync(tmpBase, { recursive: true, force: true });
+      } catch {}
+    }
+  });
+
+  function makeTmpAccounts(): string {
+    tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "cap-test-"));
+    const accountsDir = path.join(tmpBase, ".cursor-api-proxy", "accounts");
+    fs.mkdirSync(accountsDir, { recursive: true });
+    return accountsDir;
+  }
+
+  function writeCliConfig(dir: string, withAuth: boolean) {
+    fs.mkdirSync(dir, { recursive: true });
+    const cfg = withAuth
+      ? {
+          authInfo: { email: "test@example.com", displayName: "Test" },
+          version: 1,
+        }
+      : { version: 1, permissions: {} };
+    fs.writeFileSync(path.join(dir, "cli-config.json"), JSON.stringify(cfg));
+  }
+
+  it("auto-discovers only authenticated account dirs", () => {
+    const accountsDir = makeTmpAccounts();
+    writeCliConfig(path.join(accountsDir, "auth-account"), true);
+    writeCliConfig(path.join(accountsDir, "no-auth-account"), false);
+    fs.mkdirSync(path.join(accountsDir, "empty-account"), { recursive: true }); // no cli-config.json
+
+    const loaded = loadEnvConfig({ env: { HOME: tmpBase }, cwd: "/workspace" });
+    expect(loaded.configDirs).toHaveLength(1);
+    expect(loaded.configDirs[0]).toContain("auth-account");
+  });
+
+  it("returns empty configDirs when all account dirs are unauthenticated", () => {
+    const accountsDir = makeTmpAccounts();
+    writeCliConfig(path.join(accountsDir, "no-auth-1"), false);
+    writeCliConfig(path.join(accountsDir, "no-auth-2"), false);
+
+    const loaded = loadEnvConfig({ env: { HOME: tmpBase }, cwd: "/workspace" });
+    expect(loaded.configDirs).toEqual([]);
+  });
+
+  it("returns empty when accounts dir does not exist", () => {
+    tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), "cap-test-"));
+    const loaded = loadEnvConfig({ env: { HOME: tmpBase }, cwd: "/workspace" });
+    expect(loaded.configDirs).toEqual([]);
+  });
+
+  it("discovers multiple authenticated accounts and preserves filesystem order", () => {
+    const accountsDir = makeTmpAccounts();
+    writeCliConfig(path.join(accountsDir, "a-account"), true);
+    writeCliConfig(path.join(accountsDir, "b-account"), true);
+    writeCliConfig(path.join(accountsDir, "c-account"), true);
+
+    const loaded = loadEnvConfig({ env: { HOME: tmpBase }, cwd: "/workspace" });
+    expect(loaded.configDirs).toHaveLength(3);
+    expect(loaded.configDirs.map((d) => path.basename(d))).toEqual(
+      expect.arrayContaining(["a-account", "b-account", "c-account"]),
+    );
+  });
+
+  it("CURSOR_CONFIG_DIRS takes priority over auto-discovery", () => {
+    const accountsDir = makeTmpAccounts();
+    writeCliConfig(path.join(accountsDir, "discovered"), true);
+
+    const loaded = loadEnvConfig({
+      env: { HOME: tmpBase, CURSOR_CONFIG_DIRS: "/explicit/dir" },
+      cwd: "/workspace",
+    });
+    expect(loaded.configDirs).toEqual(["/explicit/dir"]);
+  });
 });
 
 describe("resolveAgentCommand", () => {
@@ -134,19 +307,23 @@ describe("resolveAgentCommand", () => {
   });
 
   it("uses COMSPEC for .cmd invocations on Windows when direct node launch is unavailable", () => {
-    const command = resolveAgentCommand("C:\\cursor\\agent.cmd", ["--prompt", "hello world"], {
-      platform: "win32",
-      env: {
-        COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+    const command = resolveAgentCommand(
+      "C:\\cursor\\agent.cmd",
+      ["--prompt", "hello world"],
+      {
+        platform: "win32",
+        env: {
+          COMSPEC: "C:\\Windows\\System32\\cmd.exe",
+        },
       },
-    });
+    );
 
     expect(command.command).toBe("C:\\Windows\\System32\\cmd.exe");
     expect(command.args).toEqual([
       "/d",
       "/s",
       "/c",
-      "\"\"C:\\cursor\\agent.cmd\" --prompt \"hello world\"\"",
+      '""C:\\cursor\\agent.cmd" --prompt "hello world""',
     ]);
     expect(command.windowsVerbatimArguments).toBe(true);
   });

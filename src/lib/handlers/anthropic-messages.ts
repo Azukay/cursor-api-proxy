@@ -9,7 +9,7 @@ import { createStreamParser } from "../cli-stream-parser.js";
 import type { BridgeConfig } from "../config.js";
 import { json, writeSseHeaders } from "../http.js";
 import { resolveToCursorModel } from "../model-map.js";
-import { normalizeModelId } from "../openai.js";
+import { normalizeModelId, toolsToSystemText } from "../openai.js";
 import {
   logAgentError,
   logTrafficRequest,
@@ -18,6 +18,16 @@ import {
 } from "../request-log.js";
 import { resolveModel } from "../resolve-model.js";
 import { resolveWorkspace } from "../workspace.js";
+import {
+  getNextAccountConfigDir,
+  reportRequestStart,
+  reportRequestEnd,
+  reportRateLimit,
+} from "../account-pool.js";
+
+function isRateLimited(stderr: string): boolean {
+  return /\b429\b|rate.?limit|too many requests/i.test(stderr);
+}
 
 export type AnthropicMessagesCtx = {
   config: BridgeConfig;
@@ -38,6 +48,16 @@ export async function handleAnthropicMessages(
   const requested = normalizeModelId(body.model);
   const model = resolveModel(requested, lastRequestedModelRef, config);
 
+  // Inject Anthropic tool schemas as a system text block
+  const toolsText = toolsToSystemText((body as any).tools);
+  const systemWithTools = toolsText
+    ? [body.system, toolsText].filter(Boolean).join("\n\n")
+    : body.system;
+  const prompt = buildPromptFromAnthropicMessages(
+    body.messages,
+    systemWithTools as AnthropicMessagesRequest["system"],
+  );
+
   if (body.max_tokens == null || typeof body.max_tokens !== "number") {
     json(res, 400, {
       error: {
@@ -49,7 +69,6 @@ export async function handleAnthropicMessages(
   }
 
   const cursorModel = resolveToCursorModel(model) ?? model;
-  const prompt = buildPromptFromAnthropicMessages(body.messages, body.system);
 
   const trafficMessages: TrafficMessage[] = [];
   if (body.system) {
@@ -95,6 +114,9 @@ export async function handleAnthropicMessages(
 
   if (body.stream) {
     writeSseHeaders(res);
+    res.on("error", () => {
+      /* client disconnected mid-stream */
+    });
 
     const writeEvent = (evt: object) => {
       res.write(`data: ${JSON.stringify(evt)}\n\n`);
@@ -136,19 +158,35 @@ export async function handleAnthropicMessages(
         writeEvent({ type: "content_block_stop", index: 0 });
         writeEvent({
           type: "message_delta",
-          delta: { stop_reason: "end_turn" },
+          delta: { stop_reason: "end_turn", stop_sequence: null },
+          usage: { output_tokens: 0 },
         });
         writeEvent({ type: "message_stop" });
       },
     );
+
+    const configDir = getNextAccountConfigDir();
+    reportRequestStart(configDir);
+
+    const abortController = new AbortController();
+    req.once("close", () => abortController.abort());
+
     runAgentStream(
       config,
       workspaceDir,
       cmdArgs,
       parseLine,
       tempDir,
+      configDir,
+      abortController.signal,
     )
       .then(({ code, stderr: stderrOut }) => {
+        reportRequestEnd(configDir);
+
+        if (stderrOut && isRateLimited(stderrOut)) {
+          reportRateLimit(configDir, 60000);
+        }
+
         if (code !== 0) {
           logAgentError(
             config.sessionsLogPath,
@@ -162,13 +200,32 @@ export async function handleAnthropicMessages(
         res.end();
       })
       .catch((err) => {
+        reportRequestEnd(configDir);
         console.error(`[${new Date().toISOString()}] Agent stream error:`, err);
         res.end();
       });
     return;
   }
 
-  const out = await runAgentSync(config, workspaceDir, cmdArgs, tempDir);
+  const configDir = getNextAccountConfigDir();
+  reportRequestStart(configDir);
+
+  const abortController = new AbortController();
+  req.once("close", () => abortController.abort());
+
+  const out = await runAgentSync(
+    config,
+    workspaceDir,
+    cmdArgs,
+    tempDir,
+    configDir,
+    abortController.signal,
+  );
+  reportRequestEnd(configDir);
+
+  if (out.stderr && isRateLimited(out.stderr)) {
+    reportRateLimit(configDir, 60000);
+  }
 
   if (out.code !== 0) {
     const errMsg = logAgentError(

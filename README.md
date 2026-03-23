@@ -84,7 +84,6 @@ To serve over HTTPS so browsers and clients trust the connection (e.g. `https://
    ```
 
 3. **Access the API** from any device on your tailnet:
-
    - Base URL: `https://macbook.tail4048eb.ts.net:8765/v1` (use your MagicDNS name and port)
    - Browsers will show a padlock; no certificate warnings when using Tailscale-issued certs.
 
@@ -105,7 +104,7 @@ This is an optional consumer-side example. `openai` is not a dependency of `curs
 import OpenAI from "openai";
 import { getOpenAIOptionsAsync } from "cursor-api-proxy";
 
-const opts = await getOpenAIOptionsAsync();  // starts proxy if needed
+const opts = await getOpenAIOptionsAsync(); // starts proxy if needed
 const client = new OpenAI(opts);
 
 const completion = await client.chat.completions.create({
@@ -122,7 +121,7 @@ For a sync config without auto-start, use `getOpenAIOptions()` and ensure the pr
 ```js
 import { createCursorProxyClient } from "cursor-api-proxy";
 
-const proxy = createCursorProxyClient();  // proxy starts on first request if needed
+const proxy = createCursorProxyClient(); // proxy starts on first request if needed
 const data = await proxy.chatCompletionsCreate({
   model: "auto",
   messages: [{ role: "user", content: "Hello" }],
@@ -144,40 +143,43 @@ const client = new OpenAI({
 
 ### Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Server and config info |
-| GET | `/v1/models` | List Cursor models (from `agent --list-models`) |
-| POST | `/v1/chat/completions` | Chat completion (OpenAI shape; supports `stream: true`) |
-| POST | `/v1/messages` | Anthropic Messages API (used by Claude Code; supports `stream: true`) |
+| Method | Path                   | Description                                                           |
+| ------ | ---------------------- | --------------------------------------------------------------------- |
+| GET    | `/health`              | Server and config info                                                |
+| GET    | `/v1/models`           | List Cursor models (from `agent --list-models`)                       |
+| POST   | `/v1/chat/completions` | Chat completion (OpenAI shape; supports `stream: true`)               |
+| POST   | `/v1/messages`         | Anthropic Messages API (used by Claude Code; supports `stream: true`) |
 
 ## Environment variables
 
 Environment handling is centralized in one module. Aliases, defaults, path resolution, platform fallbacks, and `--tailscale` host behavior are resolved consistently before the server starts.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CURSOR_BRIDGE_HOST` | `127.0.0.1` | Bind address |
-| `CURSOR_BRIDGE_PORT` | `8765` | Port |
-| `CURSOR_BRIDGE_API_KEY` | — | If set, require `Authorization: Bearer <key>` on requests |
-| `CURSOR_BRIDGE_WORKSPACE` | process cwd | Workspace directory for Cursor CLI |
-| `CURSOR_BRIDGE_MODE` | — | Ignored; proxy always runs in **ask** (chat-only) mode so the CLI never creates or edits files. |
-| `CURSOR_BRIDGE_DEFAULT_MODEL` | `auto` | Default model when request omits one |
-| `CURSOR_BRIDGE_STRICT_MODEL` | `true` | Use last requested model when none specified |
-| `CURSOR_BRIDGE_FORCE` | `false` | Pass `--force` to Cursor CLI |
-| `CURSOR_BRIDGE_APPROVE_MCPS` | `false` | Pass `--approve-mcps` to Cursor CLI |
-| `CURSOR_BRIDGE_TIMEOUT_MS` | `300000` | Timeout per completion (ms) |
-| `CURSOR_BRIDGE_TLS_CERT` | — | Path to TLS certificate file (e.g. Tailscale cert). Use with `CURSOR_BRIDGE_TLS_KEY` for HTTPS. |
-| `CURSOR_BRIDGE_TLS_KEY` | — | Path to TLS private key file. Use with `CURSOR_BRIDGE_TLS_CERT` for HTTPS. |
-| `CURSOR_BRIDGE_SESSIONS_LOG` | `~/.cursor-api-proxy/sessions.log` | Path to log file; each request is appended as a line (timestamp, method, path, IP, status). |
-| `CURSOR_BRIDGE_CHAT_ONLY_WORKSPACE` | `true` | When `true` (default), the CLI runs in an empty temp dir so it **cannot read or write your project**; pure chat only. Set to `false` to pass the real workspace (e.g. for `X-Cursor-Workspace`). |
-| `CURSOR_BRIDGE_VERBOSE` | `false` | When `true`, print full request messages and response content to stdout for every completion (both stream and sync). |
-| `CURSOR_BRIDGE_MAX_MODE` | `false` | When `true`, enable Cursor **Max Mode** for all requests (larger context window, higher tool-call limits). The proxy writes `maxMode: true` to `cli-config.json` before each run. Works when using `CURSOR_AGENT_NODE`/`CURSOR_AGENT_SCRIPT` or the default Windows `.cmd` layout (node.exe + index.js next to agent.cmd). |
-| `CURSOR_AGENT_BIN` | `agent` | Path to Cursor CLI binary. Alias precedence: `CURSOR_AGENT_BIN`, then `CURSOR_CLI_BIN`, then `CURSOR_CLI_PATH`. |
-| `CURSOR_AGENT_NODE` | — | **(Windows)** Path to Node.js executable. When set together with `CURSOR_AGENT_SCRIPT`, spawns Node directly instead of going through cmd.exe, bypassing the ~8191 character command line limit. |
-| `CURSOR_AGENT_SCRIPT` | — | **(Windows)** Path to the agent script (e.g. `agent.cmd` or the underlying `.js`). Use with `CURSOR_AGENT_NODE` to bypass cmd.exe for long prompts. |
+| Variable                            | Default                            | Description                                                                                                                                                                                                                                                                                                                |
+| ----------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CURSOR_BRIDGE_HOST`                | `127.0.0.1`                        | Bind address                                                                                                                                                                                                                                                                                                               |
+| `CURSOR_BRIDGE_PORT`                | `8765`                             | Port                                                                                                                                                                                                                                                                                                                       |
+| `CURSOR_BRIDGE_API_KEY`             | —                                  | If set, require `Authorization: Bearer <key>` on requests                                                                                                                                                                                                                                                                  |
+| `CURSOR_BRIDGE_WORKSPACE`           | process cwd                        | Workspace directory for Cursor CLI                                                                                                                                                                                                                                                                                         |
+| `CURSOR_BRIDGE_MODE`                | —                                  | Ignored; proxy always runs in **ask** (chat-only) mode so the CLI never creates or edits files.                                                                                                                                                                                                                            |
+| `CURSOR_BRIDGE_DEFAULT_MODEL`       | `auto`                             | Default model when request omits one                                                                                                                                                                                                                                                                                       |
+| `CURSOR_BRIDGE_STRICT_MODEL`        | `true`                             | Use last requested model when none specified                                                                                                                                                                                                                                                                               |
+| `CURSOR_BRIDGE_FORCE`               | `false`                            | Pass `--force` to Cursor CLI                                                                                                                                                                                                                                                                                               |
+| `CURSOR_BRIDGE_APPROVE_MCPS`        | `false`                            | Pass `--approve-mcps` to Cursor CLI                                                                                                                                                                                                                                                                                        |
+| `CURSOR_BRIDGE_TIMEOUT_MS`          | `300000`                           | Timeout per completion (ms)                                                                                                                                                                                                                                                                                                |
+| `CURSOR_BRIDGE_TLS_CERT`            | —                                  | Path to TLS certificate file (e.g. Tailscale cert). Use with `CURSOR_BRIDGE_TLS_KEY` for HTTPS.                                                                                                                                                                                                                            |
+| `CURSOR_BRIDGE_TLS_KEY`             | —                                  | Path to TLS private key file. Use with `CURSOR_BRIDGE_TLS_CERT` for HTTPS.                                                                                                                                                                                                                                                 |
+| `CURSOR_BRIDGE_SESSIONS_LOG`        | `~/.cursor-api-proxy/sessions.log` | Path to log file; each request is appended as a line (timestamp, method, path, IP, status).                                                                                                                                                                                                                                |
+| `CURSOR_BRIDGE_CHAT_ONLY_WORKSPACE` | `true`                             | When `true` (default), the CLI runs in an empty temp dir so it **cannot read or write your project**; pure chat only. Set to `false` to pass the real workspace (e.g. for `X-Cursor-Workspace`).                                                                                                                           |
+| `CURSOR_BRIDGE_VERBOSE`             | `false`                            | When `true`, print full request messages and response content to stdout for every completion (both stream and sync).                                                                                                                                                                                                       |
+| `CURSOR_BRIDGE_MAX_MODE`            | `false`                            | When `true`, enable Cursor **Max Mode** for all requests (larger context window, higher tool-call limits). The proxy writes `maxMode: true` to `cli-config.json` before each run. Works when using `CURSOR_AGENT_NODE`/`CURSOR_AGENT_SCRIPT` or the default Windows `.cmd` layout (node.exe + index.js next to agent.cmd). |
+| `CURSOR_CONFIG_DIRS`                | —                                  | Comma-separated list of configuration directories (e.g. `/home/user/.config/cursor-agent-1,/home/user/.config/cursor-agent-2`). Used for round-robin rotation between multiple accounts to distribute load and avoid rate limits.                                                                                          |
+| `CURSOR_BRIDGE_MULTI_PORT`          | `false`                            | When `true` and `CURSOR_CONFIG_DIRS` is set, instead of a single server doing round-robin, the proxy spawns a separate server for each configuration directory on incrementing ports (starting from `CURSOR_BRIDGE_PORT`).                                                                                                 |
+| `CURSOR_AGENT_BIN`                  | `agent`                            | Path to Cursor CLI binary. Alias precedence: `CURSOR_AGENT_BIN`, then `CURSOR_CLI_BIN`, then `CURSOR_CLI_PATH`.                                                                                                                                                                                                            |
+| `CURSOR_AGENT_NODE`                 | —                                  | **(Windows)** Path to Node.js executable. When set together with `CURSOR_AGENT_SCRIPT`, spawns Node directly instead of going through cmd.exe, bypassing the ~8191 character command line limit.                                                                                                                           |
+| `CURSOR_AGENT_SCRIPT`               | —                                  | **(Windows)** Path to the agent script (e.g. `agent.cmd` or the underlying `.js`). Use with `CURSOR_AGENT_NODE` to bypass cmd.exe for long prompts.                                                                                                                                                                        |
 
 Notes:
+
 - `--tailscale` changes the default host to `0.0.0.0` only when `CURSOR_BRIDGE_HOST` is not already set.
 - Relative paths such as `CURSOR_BRIDGE_WORKSPACE`, `CURSOR_BRIDGE_SESSIONS_LOG`, `CURSOR_BRIDGE_TLS_CERT`, and `CURSOR_BRIDGE_TLS_KEY` are resolved from the current working directory.
 
@@ -195,12 +197,57 @@ set CURSOR_AGENT_SCRIPT=C:\path\to\Cursor\resources\agent\agent.cmd
 
 CLI flags:
 
-| Flag | Description |
-|------|-------------|
-| `--tailscale` | Bind to `0.0.0.0` for access from tailnet/LAN (unless `CURSOR_BRIDGE_HOST` is already set) |
-| `-h`, `--help` | Show CLI usage |
+| Flag           | Description                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------ |
+| `--tailscale`  | Bind to `0.0.0.0` for access from tailnet/LAN (unless `CURSOR_BRIDGE_HOST` is already set) |
+| `-h`, `--help` | Show CLI usage                                                                             |
 
 Optional per-request override: send header `X-Cursor-Workspace: <path>` to use a different workspace for that request.
+
+## Multi-Account Setup
+
+You can use multiple Cursor accounts to distribute load and avoid hitting usage limits. The proxy now includes a built-in account manager that makes this very easy.
+
+### 1. Adding Accounts (Easy Method)
+
+You can add new accounts using the CLI `login` command. This will launch the Cursor CLI login process in an isolated profile directory (`~/.cursor-api-proxy/accounts/`).
+
+```bash
+npx cursor-api-proxy login account1
+```
+
+_(A clean, incognito browser window will open for you to log into Cursor. Once done, the session is saved)._
+
+Repeat this for as many accounts as you want:
+
+```bash
+npx cursor-api-proxy login account2
+npx cursor-api-proxy login account3
+```
+
+**Auto-Discovery:** When you start the proxy server normally (`npx cursor-api-proxy`), it will automatically find all accounts in your `~/.cursor-api-proxy/accounts/` directory and include them in the rotation pool!
+
+### 2. Manual Config Directories
+
+If you already have separate configuration folders (or want to specify them explicitly), you can override auto-discovery using the `CURSOR_CONFIG_DIRS` environment variable:
+
+```bash
+CURSOR_CONFIG_DIRS=/path/to/cursor-agent-1,/path/to/cursor-agent-2 npm start
+```
+
+### 3. Modes of operation
+
+**A. Single Port, Round-Robin Rotation (Default)**  
+In this mode, the proxy listens on one port and rotates through the available accounts for each request, selecting the least busy account automatically. This is active by default when multiple accounts are found.
+
+**B. Multi-Port (One Server Per Account)**  
+If you want granular control (for example, to explicitly assign specific clients to specific accounts), you can use multi-port mode. The proxy will spawn multiple instances on incrementing ports, starting from `CURSOR_BRIDGE_PORT`.
+
+```bash
+CURSOR_BRIDGE_MULTI_PORT=true CURSOR_BRIDGE_PORT=8765 npm start
+```
+
+_Result: account1 is on 8765, account2 is on 8766, etc._
 
 ## Streaming
 

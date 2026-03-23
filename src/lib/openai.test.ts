@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeModelId,
   buildPromptFromMessages,
+  toolsToSystemText,
   type OpenAiChatCompletionRequest,
 } from "./openai.js";
 
@@ -81,18 +82,39 @@ describe("buildPromptFromMessages", () => {
     expect(prompt).toContain("Tool: 42");
   });
 
-  it("handles array content (multimodal)", () => {
+  it("handles array content (multimodal) with image placeholder", () => {
     const messages = [
       {
         role: "user",
         content: [
           { type: "text", text: "Describe this" },
-          { type: "image_url", image_url: { url: "..." } },
+          {
+            type: "image_url",
+            image_url: { url: "https://example.com/img.png" },
+          },
         ],
       },
     ];
     const prompt = buildPromptFromMessages(messages);
-    expect(prompt).toContain("User: Describe this");
+    expect(prompt).toContain("Describe this");
+    expect(prompt).toContain("[Image: https://example.com/img.png]");
+  });
+
+  it("includes base64 image placeholder without leaking data", () => {
+    const messages = [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: "data:image/jpeg;base64,/9j/..." },
+          },
+        ],
+      },
+    ];
+    const prompt = buildPromptFromMessages(messages);
+    expect(prompt).toContain("[Image: base64 image/jpeg]");
+    expect(prompt).not.toContain("/9j/");
   });
 
   it("handles empty messages", () => {
@@ -112,5 +134,49 @@ describe("buildPromptFromMessages", () => {
     ];
     const prompt = buildPromptFromMessages(messages);
     expect(prompt).toBe("User: Hello\n\nAssistant:");
+  });
+});
+
+describe("toolsToSystemText", () => {
+  it("returns undefined when no tools or functions", () => {
+    expect(toolsToSystemText()).toBeUndefined();
+    expect(toolsToSystemText([], [])).toBeUndefined();
+  });
+
+  it("serialises tools array into readable text", () => {
+    const tools = [
+      {
+        type: "function",
+        function: {
+          name: "get_weather",
+          description: "Get current weather",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+    ];
+    const result = toolsToSystemText(tools);
+    expect(result).toBeDefined();
+    expect(result).toContain("get_weather");
+    expect(result).toContain("Get current weather");
+    expect(result).toContain("Available tools");
+  });
+
+  it("serialises legacy functions array", () => {
+    const functions = [
+      { name: "add", description: "Add two numbers", parameters: {} },
+    ];
+    const result = toolsToSystemText(undefined, functions);
+    expect(result).toContain("add");
+    expect(result).toContain("Add two numbers");
+  });
+
+  it("merges tools and functions together", () => {
+    const tools = [
+      { type: "function", function: { name: "foo", description: "foo fn" } },
+    ];
+    const functions = [{ name: "bar", description: "bar fn" }];
+    const result = toolsToSystemText(tools, functions);
+    expect(result).toContain("foo");
+    expect(result).toContain("bar");
   });
 });

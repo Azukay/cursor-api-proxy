@@ -10,6 +10,7 @@ import { resolveToCursorModel } from "../model-map.js";
 import {
   buildPromptFromMessages,
   normalizeModelId,
+  toolsToSystemText,
   type OpenAiChatCompletionRequest,
 } from "../openai.js";
 import {
@@ -20,6 +21,16 @@ import {
 } from "../request-log.js";
 import { resolveModel } from "../resolve-model.js";
 import { resolveWorkspace } from "../workspace.js";
+import {
+  getNextAccountConfigDir,
+  reportRequestStart,
+  reportRequestEnd,
+  reportRateLimit,
+} from "../account-pool.js";
+
+function isRateLimited(stderr: string): boolean {
+  return /\b429\b|rate.?limit|too many requests/i.test(stderr);
+}
 
 export type ChatCompletionsCtx = {
   config: BridgeConfig;
@@ -40,7 +51,13 @@ export async function handleChatCompletions(
   const requested = normalizeModelId(body.model);
   const model = resolveModel(requested, lastRequestedModelRef, config);
   const cursorModel = resolveToCursorModel(model) ?? model;
-  const prompt = buildPromptFromMessages(body.messages ?? []);
+
+  // Inject tool/function schemas as a system message so the model is aware of them
+  const toolsText = toolsToSystemText(body.tools, body.functions);
+  const messagesWithTools = toolsText
+    ? [{ role: "system", content: toolsText }, ...(body.messages ?? [])]
+    : (body.messages ?? []);
+  const prompt = buildPromptFromMessages(messagesWithTools);
 
   const trafficMessages: TrafficMessage[] = (body.messages ?? []).map(
     (m: any) => {
@@ -79,6 +96,9 @@ export async function handleChatCompletions(
 
   if (body.stream) {
     writeSseHeaders(res);
+    res.on("error", () => {
+      /* client disconnected mid-stream */
+    });
 
     let accumulated = "";
     const parseLine = createStreamParser(
@@ -115,15 +135,30 @@ export async function handleChatCompletions(
         res.write("data: [DONE]\n\n");
       },
     );
+
+    const configDir = getNextAccountConfigDir();
+    reportRequestStart(configDir);
+
+    const abortController = new AbortController();
+    req.once("close", () => abortController.abort());
+
     runAgentStream(
       config,
       workspaceDir,
       cmdArgs,
       parseLine,
       tempDir,
+      configDir,
+      abortController.signal,
     )
       .then(({ code, stderr: stderrOut }) => {
-        if (code !== 0) {
+        reportRequestEnd(configDir);
+
+        if (stderrOut && isRateLimited(stderrOut)) {
+          reportRateLimit(configDir, 60000);
+        }
+
+        if (code !== 0 && !abortController.signal.aborted) {
           logAgentError(
             config.sessionsLogPath,
             method,
@@ -136,13 +171,32 @@ export async function handleChatCompletions(
         res.end();
       })
       .catch((err) => {
+        reportRequestEnd(configDir);
         console.error(`[${new Date().toISOString()}] Agent stream error:`, err);
         res.end();
       });
     return;
   }
 
-  const out = await runAgentSync(config, workspaceDir, cmdArgs, tempDir);
+  const configDir = getNextAccountConfigDir();
+  reportRequestStart(configDir);
+
+  const abortController = new AbortController();
+  req.once("close", () => abortController.abort());
+
+  const out = await runAgentSync(
+    config,
+    workspaceDir,
+    cmdArgs,
+    tempDir,
+    configDir,
+    abortController.signal,
+  );
+  reportRequestEnd(configDir);
+
+  if (out.stderr && isRateLimited(out.stderr)) {
+    reportRateLimit(configDir, 60000);
+  }
 
   if (out.code !== 0) {
     const errMsg = logAgentError(

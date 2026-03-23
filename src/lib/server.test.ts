@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as http from "node:http";
+import * as https from "node:https";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { startBridgeServer } from "./server.js";
 import type { BridgeConfig } from "./config.js";
 
@@ -57,6 +58,8 @@ function createTestConfig(overrides: Partial<BridgeConfig> = {}): BridgeConfig {
     chatOnlyWorkspace: true,
     verbose: false,
     maxMode: false,
+    configDirs: overrides.configDirs ?? [],
+    multiPort: overrides.multiPort ?? false,
     ...overrides,
   };
 }
@@ -98,41 +101,42 @@ async function fetchServer(
 }
 
 describe("startBridgeServer", () => {
-  let server: http.Server;
+  let servers: (http.Server | https.Server)[] = [];
 
-  afterEach(() => {
-    if (server) {
-      server.close();
+  afterEach(async () => {
+    for (const s of servers) {
+      await new Promise((r) => s.close(r));
     }
+    servers = [];
   });
 
   it("responds 200 on GET /health", async () => {
-    server = startBridgeServer({
-      version: "0.1.0",
+    servers = startBridgeServer({
+      version: "1.0.0",
       config: createTestConfig(),
     });
     await new Promise<void>((resolve) =>
-      server.on("listening", () => resolve()),
+      servers[0].on("listening", () => resolve()),
     );
 
-    const { status, body } = await fetchServer(server, "/health");
+    const { status, body } = await fetchServer(servers[0], "/health");
     expect(status).toBe(200);
     const data = JSON.parse(body);
     expect(data.ok).toBe(true);
-    expect(data.version).toBe("0.1.0");
+    expect(data.version).toBe("1.0.0");
     expect(data.defaultModel).toBe("auto");
   });
 
   it("responds 200 on GET /v1/models", async () => {
-    server = startBridgeServer({
-      version: "0.1.0",
+    servers = startBridgeServer({
+      version: "1.0.0",
       config: createTestConfig(),
     });
     await new Promise<void>((resolve) =>
-      server.on("listening", () => resolve()),
+      servers[0].on("listening", () => resolve()),
     );
 
-    const { status, body } = await fetchServer(server, "/v1/models");
+    const { status, body } = await fetchServer(servers[0], "/v1/models");
     expect(status).toBe(200);
     const data = JSON.parse(body);
     expect(data.object).toBe("list");
@@ -141,69 +145,100 @@ describe("startBridgeServer", () => {
   });
 
   it("returns 401 when requiredKey is set and Authorization is missing", async () => {
-    server = startBridgeServer({
-      version: "0.1.0",
-      config: createTestConfig({ requiredKey: "sk-secret" }),
+    servers = startBridgeServer({
+      version: "1.0.0",
+      config: createTestConfig({ requiredKey: "secret123" }),
     });
     await new Promise<void>((resolve) =>
-      server.on("listening", () => resolve()),
+      servers[0].on("listening", () => resolve()),
     );
 
-    const { status, body } = await fetchServer(server, "/health");
+    const { status, body } = await fetchServer(servers[0], "/health");
     expect(status).toBe(401);
     const data = JSON.parse(body);
     expect(data.error.message).toBe("Invalid API key");
   });
 
   it("returns 200 when requiredKey matches Authorization", async () => {
-    server = startBridgeServer({
-      version: "0.1.0",
-      config: createTestConfig({ requiredKey: "sk-secret" }),
+    servers = startBridgeServer({
+      version: "1.0.0",
+      config: createTestConfig({ requiredKey: "secret123" }),
     });
     await new Promise<void>((resolve) =>
-      server.on("listening", () => resolve()),
+      servers[0].on("listening", () => resolve()),
     );
 
-    const { status } = await fetchServer(server, "/health", {
-      headers: { Authorization: "Bearer sk-secret" },
+    const { status } = await fetchServer(servers[0], "/health", {
+      headers: { Authorization: "Bearer secret123" },
     });
     expect(status).toBe(200);
   });
 
   it("returns 404 for unknown path", async () => {
-    server = startBridgeServer({
-      version: "0.1.0",
+    servers = startBridgeServer({
+      version: "1.0.0",
       config: createTestConfig(),
     });
     await new Promise<void>((resolve) =>
-      server.on("listening", () => resolve()),
+      servers[0].on("listening", () => resolve()),
     );
 
-    const { status, body } = await fetchServer(server, "/unknown");
+    const { status, body } = await fetchServer(servers[0], "/unknown");
     expect(status).toBe(404);
     const data = JSON.parse(body);
     expect(data.error.code).toBe("not_found");
   });
 
   it("returns 200 for POST /v1/chat/completions (non-streaming)", async () => {
-    server = startBridgeServer({
-      version: "0.1.0",
+    servers = startBridgeServer({
+      version: "1.0.0",
       config: createTestConfig(),
     });
     await new Promise<void>((resolve) =>
-      server.on("listening", () => resolve()),
+      servers[0].on("listening", () => resolve()),
     );
 
-    const { status, body } = await fetchServer(server, "/v1/chat/completions", {
-      method: "POST",
-      body: JSON.stringify({
-        model: "claude-3-opus",
-        messages: [{ role: "user", content: "Hi" }],
-      }),
-    });
+    const { status, body } = await fetchServer(
+      servers[0],
+      "/v1/chat/completions",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          model: "claude-3-opus",
+          messages: [{ role: "user", content: "Hi" }],
+        }),
+      },
+    );
     expect(status).toBe(200);
     const data = JSON.parse(body);
     expect(data.object).toBe("chat.completion");
     expect(data.choices[0].message.content).toBe("Hello from agent");
+  });
+
+  it("should spawn multiple servers when multiPort is true", async () => {
+    servers = startBridgeServer({
+      version: "1.0.0",
+      config: createTestConfig({
+        configDirs: ["/dir1", "/dir2"],
+        multiPort: true,
+        port: 10000, // Use a safe high port instead of 0
+      }),
+    });
+
+    expect(servers.length).toBe(2);
+
+    // Wait for both to be listening
+    await Promise.all(
+      servers.map(
+        (s) => new Promise<void>((resolve) => s.on("listening", resolve)),
+      ),
+    );
+
+    // Check that both servers respond
+    const res1 = await fetchServer(servers[0], "/health");
+    const res2 = await fetchServer(servers[1], "/health");
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
   });
 });

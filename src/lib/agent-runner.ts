@@ -14,12 +14,16 @@ export function runAgentSync(
   workspaceDir: string,
   cmdArgs: string[],
   tempDir?: string,
+  configDir?: string,
+  signal?: AbortSignal,
 ): Promise<AgentRunResult> {
   return run(config.agentBin, cmdArgs, {
     cwd: workspaceDir,
     timeoutMs: config.timeoutMs,
     maxMode: config.maxMode,
-  }).then((out) => {
+    configDir,
+    signal,
+  }).finally(() => {
     if (tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -27,7 +31,6 @@ export function runAgentSync(
         /* ignore */
       }
     }
-    return out;
   });
 }
 
@@ -39,13 +42,17 @@ export function runAgentStream(
   cmdArgs: string[],
   onLine: StreamLineHandler,
   tempDir?: string,
+  configDir?: string,
+  signal?: AbortSignal,
 ): Promise<{ code: number; stderr: string }> {
   return runStreaming(config.agentBin, cmdArgs, {
     cwd: workspaceDir,
     timeoutMs: config.timeoutMs,
     maxMode: config.maxMode,
     onLine,
-  }).then((result) => {
+    configDir,
+    signal,
+  }).finally(() => {
     if (tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -53,6 +60,5 @@ export function runAgentStream(
         /* ignore */
       }
     }
-    return result;
   });
 }

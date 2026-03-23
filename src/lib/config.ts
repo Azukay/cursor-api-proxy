@@ -26,6 +26,10 @@ export type BridgeConfig = {
   verbose: boolean;
   /** When true, enable Cursor Max Mode (larger context, more tool calls) via cli-config.json preflight. */
   maxMode: boolean;
+  /** Pool of cursor configuration directories for round-robin account rotation. */
+  configDirs: string[];
+  /** When true, runs each config dir on its own incrementing port starting from `port` */
+  multiPort: boolean;
 };
 
 export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
@@ -49,5 +53,7 @@ export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
     chatOnlyWorkspace: env.chatOnlyWorkspace,
     verbose: env.verbose,
     maxMode: env.maxMode,
+    configDirs: env.configDirs ?? [],
+    multiPort: env.multiPort,
   };
 }

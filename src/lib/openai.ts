@@ -2,6 +2,10 @@ export type OpenAiChatCompletionRequest = {
   model?: string;
   messages: any[];
   stream?: boolean;
+  tools?: any[];
+  tool_choice?: any;
+  functions?: any[];
+  function_call?: any;
 };
 
 export function normalizeModelId(raw: string | undefined): string | undefined {
@@ -12,6 +16,22 @@ export function normalizeModelId(raw: string | undefined): string | undefined {
   return parts[parts.length - 1] || undefined;
 }
 
+function imageUrlToText(imageUrl: any): string {
+  if (!imageUrl) return "[Image]";
+  const url: string =
+    typeof imageUrl === "string"
+      ? imageUrl
+      : typeof imageUrl?.url === "string"
+        ? imageUrl.url
+        : "";
+  if (!url) return "[Image]";
+  if (url.startsWith("data:")) {
+    const mime = url.slice(5, url.indexOf(";")) || "image";
+    return `[Image: base64 ${mime}]`;
+  }
+  return `[Image: ${url}]`;
+}
+
 function messageContentToText(content: any): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -20,11 +40,50 @@ function messageContentToText(content: any): string {
         if (!p) return "";
         if (typeof p === "string") return p;
         if (p.type === "text" && typeof p.text === "string") return p.text;
+        if (p.type === "image_url") return imageUrlToText(p.image_url);
+        if (p.type === "image") return imageUrlToText(p.source?.url ?? p.url ?? p.source);
         return "";
       })
-      .join("");
+      .filter(Boolean)
+      .join(" ");
   }
   return "";
+}
+
+/**
+ * Serialise tool/function schemas into a text block for the system prompt.
+ * This allows the model to be aware of available tools even though we can't
+ * return tool_call deltas natively.
+ */
+export function toolsToSystemText(
+  tools?: any[],
+  functions?: any[],
+): string | undefined {
+  const defs: any[] = [];
+
+  if (tools && tools.length > 0) {
+    for (const t of tools) {
+      const fn = t?.type === "function" ? t.function : t;
+      if (fn) defs.push(fn);
+    }
+  }
+  if (functions && functions.length > 0) {
+    defs.push(...functions);
+  }
+
+  if (defs.length === 0) return undefined;
+
+  const lines = [
+    "Available tools (respond with a JSON object to call one):",
+    "",
+    ...defs.map((fn) => {
+      const params = fn.parameters
+        ? JSON.stringify(fn.parameters, null, 2)
+        : "{}";
+      return `Function: ${fn.name}\nDescription: ${fn.description ?? ""}\nParameters: ${params}`;
+    }),
+  ];
+  return lines.join("\n");
 }
 
 export function buildPromptFromMessages(messages: any[]): string {
