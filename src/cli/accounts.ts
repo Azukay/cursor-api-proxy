@@ -2,6 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ACCOUNTS_DIR } from "./constants.js";
+import {
+  readCachedToken,
+  readKeychainToken,
+  tokenSub,
+  fetchAccountUsage,
+  fetchStripeProfile,
+  formatUsageSummary,
+} from "./usage.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -13,6 +21,7 @@ export interface AccountInfo {
   authenticated: boolean;
   email?: string;
   displayName?: string;
+  authId?: string;
   plan?: string;
   subscriptionStatus?: string;
   expiresAt?: string;
@@ -34,12 +43,13 @@ export function readAccountInfo(name: string, configDir: string): AccountInfo {
 
   try {
     const raw = JSON.parse(fs.readFileSync(configFile, "utf-8")) as {
-      authInfo?: { email?: string; displayName?: string };
+      authInfo?: { email?: string; displayName?: string; authId?: string };
     };
     if (raw.authInfo) {
       info.authenticated = true;
       info.email = raw.authInfo.email;
       info.displayName = raw.authInfo.displayName;
+      info.authId = raw.authInfo.authId;
     }
   } catch {
     // malformed config — treat as unauthenticated
@@ -110,9 +120,13 @@ export async function handleAccountsList(): Promise<void> {
 
   console.log("🔑 Cursor Accounts:\n");
 
+  // Try to find an available token (per-account cache first, shared keychain fallback)
+  const keychainToken = readKeychainToken();
+
   for (let i = 0; i < names.length; i++) {
     const name = names[i];
-    const info = readAccountInfo(name, path.join(ACCOUNTS_DIR, name));
+    const configDir = path.join(ACCOUNTS_DIR, name);
+    const info = readAccountInfo(name, configDir);
 
     console.log(`  ${i + 1}. ${name}`);
 
@@ -128,6 +142,41 @@ export async function handleAccountsList(): Promise<void> {
         console.log(`     📊 ${info.plan}${canceled}${expiry}`);
       }
       console.log(`     ✅ Authenticated`);
+
+      // Try to fetch live usage: prefer per-account cached token, fall back to keychain
+      const cachedToken = readCachedToken(configDir);
+      const token =
+        cachedToken ??
+        (keychainToken && info.authId && tokenSub(keychainToken) === info.authId
+          ? keychainToken
+          : undefined);
+
+      if (token) {
+        try {
+          const [usage, profile] = await Promise.all([
+            fetchAccountUsage(token),
+            fetchStripeProfile(token),
+          ]);
+          if (profile) {
+            const plan =
+              profile.membershipType === "free_trial"
+                ? `Free Trial (${profile.daysRemainingOnTrial ?? 0}d left)`
+                : profile.membershipType === "pro"
+                  ? "Pro"
+                  : profile.membershipType;
+            console.log(
+              `     💳 Plan (live): ${plan} · ${profile.subscriptionStatus}`,
+            );
+          }
+          if (usage) {
+            for (const line of formatUsageSummary(usage)) console.log(line);
+          }
+        } catch {
+          /* ignore live fetch errors */
+        }
+      } else {
+        console.log(`     ℹ️  Run a request to load live usage stats`);
+      }
     } else {
       console.log(`     ⚠️  Not authenticated`);
     }

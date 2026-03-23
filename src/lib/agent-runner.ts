@@ -2,6 +2,13 @@ import * as fs from "node:fs";
 
 import type { BridgeConfig } from "./config.js";
 import { run, runStreaming } from "./process.js";
+import { readKeychainToken, writeCachedToken } from "../cli/usage.js";
+
+function cacheTokenForAccount(configDir?: string): void {
+  if (!configDir) return;
+  const token = readKeychainToken();
+  if (token) writeCachedToken(configDir, token);
+}
 
 export type AgentRunResult = {
   code: number;
@@ -24,6 +31,7 @@ export function runAgentSync(
     configDir,
     signal,
   }).finally(() => {
+    cacheTokenForAccount(configDir);
     if (tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -53,6 +61,7 @@ export function runAgentStream(
     configDir,
     signal,
   }).finally(() => {
+    cacheTokenForAccount(configDir);
     if (tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
