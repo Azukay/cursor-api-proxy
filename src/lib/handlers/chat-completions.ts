@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import * as http from "node:http";
 
 import type { BridgeConfig } from "../config.js";
-import { buildAgentCmdArgs } from "../agent-cmd-args.js";
+import { buildAgentFixedArgs } from "../agent-cmd-args.js";
 import { runAgentStream, runAgentSync } from "../agent-runner.js";
 import { createStreamParser } from "../cli-stream-parser.js";
 import { json, writeSseHeaders } from "../http.js";
@@ -33,6 +33,10 @@ import {
   reportRequestError,
   getAccountStats,
 } from "../account-pool.js";
+import {
+  fitPromptToWinCmdline,
+  warnPromptTruncated,
+} from "../win-cmdline-limit.js";
 
 function isRateLimited(stderr: string): boolean {
   return /\b429\b|rate.?limit|too many requests/i.test(stderr);
@@ -89,19 +93,37 @@ export async function handleChatCompletions(
   const headerWs = req.headers["x-cursor-workspace"];
   const { workspaceDir, tempDir } = resolveWorkspace(config, headerWs);
 
-  const cmdArgs = buildAgentCmdArgs(
+  const fixedArgs = buildAgentFixedArgs(
     config,
     workspaceDir,
     cursorModel,
-    prompt,
     !!body.stream,
   );
+  const fit = fitPromptToWinCmdline(config.agentBin, fixedArgs, prompt, {
+    maxCmdline: config.winCmdlineMax,
+    platform: process.platform,
+    cwd: workspaceDir,
+  });
+  if (!fit.ok) {
+    json(res, 500, {
+      error: { message: fit.error, code: "windows_cmdline_limit" },
+    });
+    return;
+  }
+  if (fit.truncated) {
+    warnPromptTruncated(fit.originalLength, fit.finalPromptLength);
+  }
+  const cmdArgs = fit.args;
 
   const id = `chatcmpl_${randomUUID().replace(/-/g, "")}`;
   const created = Math.floor(Date.now() / 1000);
 
+  const truncatedHeaders = fit.truncated
+    ? { "X-Cursor-Proxy-Prompt-Truncated": "true" }
+    : undefined;
+
   if (body.stream) {
-    writeSseHeaders(res);
+    writeSseHeaders(res, truncatedHeaders);
     res.on("error", () => {
       /* client disconnected mid-stream */
     });
@@ -236,18 +258,23 @@ export async function handleChatCompletions(
   const content = out.stdout.trim();
   logTrafficResponse(config.verbose, model ?? cursorModel, content, false);
   logAccountStats(config.verbose, getAccountStats());
-  json(res, 200, {
-    id,
-    object: "chat.completion",
-    created,
-    model,
-    choices: [
-      {
-        index: 0,
-        message: { role: "assistant", content },
-        finish_reason: "stop",
-      },
-    ],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-  });
+  json(
+    res,
+    200,
+    {
+      id,
+      object: "chat.completion",
+      created,
+      model,
+      choices: [
+        {
+          index: 0,
+          message: { role: "assistant", content },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    },
+    truncatedHeaders,
+  );
 }

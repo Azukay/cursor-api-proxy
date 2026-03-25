@@ -3,7 +3,7 @@ import * as http from "node:http";
 
 import type { AnthropicMessagesRequest } from "../anthropic.js";
 import { buildPromptFromAnthropicMessages } from "../anthropic.js";
-import { buildAgentCmdArgs } from "../agent-cmd-args.js";
+import { buildAgentFixedArgs } from "../agent-cmd-args.js";
 import { runAgentStream, runAgentSync } from "../agent-runner.js";
 import { createStreamParser } from "../cli-stream-parser.js";
 import type { BridgeConfig } from "../config.js";
@@ -30,6 +30,10 @@ import {
   reportRequestError,
   getAccountStats,
 } from "../account-pool.js";
+import {
+  fitPromptToWinCmdline,
+  warnPromptTruncated,
+} from "../win-cmdline-limit.js";
 
 function isRateLimited(stderr: string): boolean {
   return /\b429\b|rate.?limit|too many requests/i.test(stderr);
@@ -113,18 +117,36 @@ export async function handleAnthropicMessages(
   const headerWs = req.headers["x-cursor-workspace"];
   const { workspaceDir, tempDir } = resolveWorkspace(config, headerWs);
 
-  const cmdArgs = buildAgentCmdArgs(
+  const fixedArgs = buildAgentFixedArgs(
     config,
     workspaceDir,
     cursorModel,
-    prompt,
     !!body.stream,
   );
+  const fit = fitPromptToWinCmdline(config.agentBin, fixedArgs, prompt, {
+    maxCmdline: config.winCmdlineMax,
+    platform: process.platform,
+    cwd: workspaceDir,
+  });
+  if (!fit.ok) {
+    json(res, 500, {
+      error: { type: "api_error", message: fit.error },
+    });
+    return;
+  }
+  if (fit.truncated) {
+    warnPromptTruncated(fit.originalLength, fit.finalPromptLength);
+  }
+  const cmdArgs = fit.args;
 
   const msgId = `msg_${randomUUID().replace(/-/g, "")}`;
 
+  const truncatedHeaders = fit.truncated
+    ? { "X-Cursor-Proxy-Prompt-Truncated": "true" }
+    : undefined;
+
   if (body.stream) {
-    writeSseHeaders(res);
+    writeSseHeaders(res, truncatedHeaders);
     res.on("error", () => {
       /* client disconnected mid-stream */
     });
@@ -270,13 +292,18 @@ export async function handleAnthropicMessages(
   const content = out.stdout.trim();
   logTrafficResponse(config.verbose, model ?? cursorModel, content, false);
   logAccountStats(config.verbose, getAccountStats());
-  json(res, 200, {
-    id: msgId,
-    type: "message",
-    role: "assistant",
-    content: [{ type: "text", text: content }],
-    model: model ?? cursorModel,
-    stop_reason: "end_turn",
-    usage: { input_tokens: 0, output_tokens: 0 },
-  });
+  json(
+    res,
+    200,
+    {
+      id: msgId,
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: content }],
+      model: model ?? cursorModel,
+      stop_reason: "end_turn",
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+    truncatedHeaders,
+  );
 }
