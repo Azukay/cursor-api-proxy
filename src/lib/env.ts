@@ -35,6 +35,11 @@ export type LoadedEnv = {
   configDirs: string[];
   /** When true, runs each config dir on its own incrementing port starting from `port` */
   multiPort: boolean;
+  /**
+   * Upper bound (UTF-16 code units, pessimistic) for the Windows CreateProcess command line.
+   * On win32 the proxy truncates the prompt tail to stay under this budget.
+   */
+  winCmdlineMax: number;
 };
 
 export type AgentCommand = {
@@ -183,6 +188,16 @@ export function loadEnvConfig(opts: EnvOptions = {}): LoadedEnv {
     configDirs = discoverAccountDirs(home);
   }
 
+  const winCmdlineRaw = envNumber(
+    env,
+    ["CURSOR_BRIDGE_WIN_CMDLINE_MAX"],
+    30_000,
+  );
+  const winCmdlineMax = Math.min(
+    32_700,
+    Math.max(4096, Number.isFinite(winCmdlineRaw) ? winCmdlineRaw : 30_000),
+  );
+
   return {
     agentBin:
       envString(env, [
@@ -224,6 +239,7 @@ export function loadEnvConfig(opts: EnvOptions = {}): LoadedEnv {
     maxMode: envBool(env, ["CURSOR_BRIDGE_MAX_MODE"], false),
     configDirs,
     multiPort: envBool(env, ["CURSOR_BRIDGE_MULTI_PORT"], false),
+    winCmdlineMax,
   };
 }
 

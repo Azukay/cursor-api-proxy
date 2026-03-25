@@ -144,6 +144,9 @@ function startSingleServer(
     console.log(
       `- max mode: ${config.maxMode ? "yes (CURSOR_BRIDGE_MAX_MODE=true)" : "no"}`,
     );
+    console.log(
+      `- Windows cmdline budget: ${config.winCmdlineMax} (prompt tail truncation when over limit; Windows only)`,
+    );
     if (config.configDirs && config.configDirs.length > 0) {
       console.log(
         `- account pool: enabled with ${config.configDirs.length} configuration directories`,
