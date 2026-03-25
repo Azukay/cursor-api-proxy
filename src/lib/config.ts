@@ -30,6 +30,8 @@ export type BridgeConfig = {
   configDirs: string[];
   /** When true, runs each config dir on its own incrementing port starting from `port` */
   multiPort: boolean;
+  /** Windows CreateProcess command-line budget for prompt truncation (ignored on non-Windows). */
+  winCmdlineMax: number;
 };
 
 export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
@@ -55,5 +57,6 @@ export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
     maxMode: env.maxMode,
     configDirs: env.configDirs ?? [],
     multiPort: env.multiPort,
+    winCmdlineMax: env.winCmdlineMax,
   };
 }
