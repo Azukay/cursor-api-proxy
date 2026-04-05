@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { resolveAgentCommand } from "./env.js";
 import { runMaxModePreflight } from "./max-mode-preflight.js";
 
@@ -17,25 +17,59 @@ export type RunOptions = {
   stdinContent?: string;
   /** Env overrides for the child (e.g. HOME, CURSOR_CONFIG_DIR to isolate from global rules). */
   envOverrides?: Record<string, string>;
+  /** Custom config dir for round-robin account rotation */
+  configDir?: string;
+  /** Abort signal — when aborted, the child process is killed immediately */
+  signal?: AbortSignal;
 };
 
 export type RunStreamingOptions = RunOptions & {
   onLine: (line: string) => void;
 };
 
+// ---------------------------------------------------------------------------
+// Global child process registry — used for graceful shutdown
+// ---------------------------------------------------------------------------
+
+const activeChildren = new Set<ChildProcess>();
+
+/** Kill all in-flight agent child processes. Called on server shutdown. */
+export function killAllChildProcesses(): void {
+  for (const child of activeChildren) {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      /* already exited */
+    }
+  }
+  activeChildren.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
 function spawnChild(
   cmd: string,
   args: string[],
-  opts?: { cwd?: string; maxMode?: boolean; stdinContent?: string; envOverrides?: Record<string, string> },
+  opts?: {
+    cwd?: string;
+    maxMode?: boolean;
+    stdinContent?: string;
+    envOverrides?: Record<string, string>;
+    configDir?: string;
+  },
 ) {
   const resolved = resolveAgentCommand(cmd, args);
 
-  if (opts?.maxMode && resolved.agentScriptPath) {
-    runMaxModePreflight(resolved.agentScriptPath);
+  if (opts?.maxMode) {
+    runMaxModePreflight(resolved.agentScriptPath, opts?.configDir);
   }
 
   const env = { ...resolved.env };
-  if (resolved.configDir && !env.CURSOR_CONFIG_DIR) {
+  if (opts?.configDir) {
+    env.CURSOR_CONFIG_DIR = opts.configDir;
+  } else if (resolved.configDir && !env.CURSOR_CONFIG_DIR) {
     env.CURSOR_CONFIG_DIR = resolved.configDir;
   }
   if (opts?.envOverrides) {
@@ -50,13 +84,17 @@ function spawnChild(
     windowsVerbatimArguments: resolved.windowsVerbatimArguments,
   });
 
-  if (useStdin && opts.stdinContent !== undefined && child.stdin) {
+  if (useStdin && opts!.stdinContent !== undefined && child.stdin) {
     child.stdin.write(opts.stdinContent, "utf8");
     child.stdin.end();
   }
 
   return child;
 }
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export function runStreaming(
   cmd: string,
@@ -69,7 +107,10 @@ export function runStreaming(
       maxMode: opts.maxMode,
       stdinContent: opts.stdinContent,
       envOverrides: opts.envOverrides,
+      configDir: opts.configDir,
     });
+
+    activeChildren.add(child);
 
     const timeoutMs = opts.timeoutMs;
     const timeout =
@@ -78,6 +119,16 @@ export function runStreaming(
             child.kill("SIGKILL");
           }, timeoutMs)
         : undefined;
+
+    // Abort signal support — kill child when client disconnects
+    const onAbort = () => child.kill("SIGTERM");
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        child.kill("SIGTERM");
+      } else {
+        opts.signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
 
     let stderr = "";
     let lineBuffer = "";
@@ -97,6 +148,8 @@ export function runStreaming(
 
     child.on("error", (err: NodeJS.ErrnoException) => {
       if (timeout) clearTimeout(timeout);
+      opts.signal?.removeEventListener("abort", onAbort);
+      activeChildren.delete(child);
       if (err?.code === "ENOENT") {
         reject(
           new Error(
@@ -108,22 +161,31 @@ export function runStreaming(
       reject(err);
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (timeout) clearTimeout(timeout);
+      opts.signal?.removeEventListener("abort", onAbort);
+      activeChildren.delete(child);
       if (lineBuffer.trim()) opts.onLine(lineBuffer.trim());
-      resolve({ code: code ?? 0, stderr });
+      resolve({ code: code ?? (signal ? -1 : 0), stderr });
     });
   });
 }
 
-export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
+export function run(
+  cmd: string,
+  args: string[],
+  opts: RunOptions = {},
+): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawnChild(cmd, args, {
       cwd: opts.cwd,
       maxMode: opts.maxMode,
       stdinContent: opts.stdinContent,
       envOverrides: opts.envOverrides,
+      configDir: opts.configDir,
     });
+
+    activeChildren.add(child);
 
     const timeoutMs = opts.timeoutMs;
     const timeout =
@@ -132,6 +194,15 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
             child.kill("SIGKILL");
           }, timeoutMs)
         : undefined;
+
+    const onAbort = () => child.kill("SIGTERM");
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        child.kill("SIGTERM");
+      } else {
+        opts.signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
 
     let stdout = "";
     let stderr = "";
@@ -143,6 +214,8 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
 
     child.on("error", (err: NodeJS.ErrnoException) => {
       if (timeout) clearTimeout(timeout);
+      opts.signal?.removeEventListener("abort", onAbort);
+      activeChildren.delete(child);
       if (err?.code === "ENOENT") {
         reject(
           new Error(
@@ -154,9 +227,11 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
       reject(err);
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       if (timeout) clearTimeout(timeout);
-      resolve({ code: code ?? 0, stdout, stderr });
+      opts.signal?.removeEventListener("abort", onAbort);
+      activeChildren.delete(child);
+      resolve({ code: code ?? (signal ? -1 : 0), stdout, stderr });
     });
   });
 }

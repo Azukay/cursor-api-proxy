@@ -18,7 +18,8 @@ describe("loadBridgeConfig", () => {
     expect(config.mode).toBe("ask");
     expect(config.workspace).toBe("/workspace");
     expect(config.chatOnlyWorkspace).toBe(true);
-    expect(config.sessionsLogPath).toBe("/workspace/sessions.log");
+    expect(config.sessionsLogPath).toBe(path.join("/workspace", "sessions.log"));
+    expect(config.winCmdlineMax).toBe(30_000);
   });
 
   it("assembles config from the centralized env layer", () => {
@@ -55,8 +56,12 @@ describe("loadBridgeConfig", () => {
     expect(config.timeoutMs).toBe(60000);
     expect(config.chatOnlyWorkspace).toBe(false);
     expect(config.verbose).toBe(true);
-    expect(config.tlsCertPath).toBe("/tmp/project/certs/test.crt");
-    expect(config.tlsKeyPath).toBe("/tmp/project/certs/test.key");
+    expect(config.tlsCertPath).toBe(
+      path.resolve("/tmp/project", "./certs/test.crt"),
+    );
+    expect(config.tlsKeyPath).toBe(
+      path.resolve("/tmp/project", "./certs/test.key"),
+    );
   });
 
   it("sets acpSkipAuthenticate and acpEnv when CURSOR_API_KEY is set", () => {

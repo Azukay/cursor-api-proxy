@@ -21,8 +21,7 @@ export function createRequestListener(opts: BridgeServerOptions) {
   const lastRequestedModelRef: { current?: string } = {};
 
   return async (req: http.IncomingMessage, res: http.ServerResponse) => {
-    const protocol =
-      config.tlsCertPath && config.tlsKeyPath ? "https" : "http";
+    const protocol = config.tlsCertPath && config.tlsKeyPath ? "https" : "http";
     const url = new URL(
       req.url || "/",
       `${protocol}://${req.headers.host || "localhost"}`,
@@ -91,7 +90,27 @@ export function createRequestListener(opts: BridgeServerOptions) {
         return;
       }
 
-      json(res, 404, { error: { message: "Not found", code: "not_found" } });
+      if (
+        (req.method === "POST" || req.method === "GET") &&
+        pathname === "/v1/completions"
+      ) {
+        json(res, 404, {
+          error: {
+            message:
+              "Legacy completions endpoint is not supported. Use POST /v1/chat/completions instead.",
+            code: "not_found",
+          },
+        });
+      } else if (pathname === "/v1/embeddings") {
+        json(res, 404, {
+          error: {
+            message: "Embeddings are not supported by this proxy.",
+            code: "not_found",
+          },
+        });
+      } else {
+        json(res, 404, { error: { message: "Not found", code: "not_found" } });
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[${new Date().toISOString()}] Proxy error: ${msg}`);
@@ -106,9 +125,13 @@ export function createRequestListener(opts: BridgeServerOptions) {
       } catch {
         /* ignore */
       }
-      json(res, 500, {
-        error: { message: msg, code: "internal_error" },
-      });
+      if (!res.headersSent) {
+        json(res, 500, {
+          error: { message: msg, code: "internal_error" },
+        });
+      } else {
+        res.end();
+      }
     }
   };
 }

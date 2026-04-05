@@ -31,17 +31,30 @@ function systemToText(system: AnthropicMessagesRequest["system"]): string {
     .join("\n");
 }
 
-function anthropicContentToText(content: AnthropicMessageParam["content"]): string {
+function anthropicBlockToText(p: any): string {
+  if (!p) return "";
+  if (typeof p === "string") return p;
+  if (p.type === "text" && typeof p.text === "string") return p.text;
+  if (p.type === "image") {
+    const src = p.source;
+    if (src?.type === "base64")
+      return `[Image: base64 ${src.media_type ?? "image"}]`;
+    if (src?.type === "url") return `[Image: ${src.url}]`;
+    return "[Image]";
+  }
+  if (p.type === "document") {
+    const title = p.title ?? p.source?.url ?? "";
+    return title ? `[Document: ${title}]` : "[Document]";
+  }
+  return "";
+}
+
+function anthropicContentToText(
+  content: AnthropicMessageParam["content"],
+): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content
-    .map((p) => {
-      if (!p) return "";
-      if (typeof p === "string") return p;
-      if (p.type === "text" && typeof p.text === "string") return p.text;
-      return "";
-    })
-    .join("");
+  return (content as any[]).map(anthropicBlockToText).filter(Boolean).join(" ");
 }
 
 /**
@@ -50,7 +63,7 @@ function anthropicContentToText(content: AnthropicMessageParam["content"]): stri
  */
 export function buildPromptFromAnthropicMessages(
   messages: AnthropicMessageParam[] | undefined,
-  system?: AnthropicMessagesRequest["system"]
+  system?: AnthropicMessagesRequest["system"],
 ): string {
   const openaiMessages: Array<{ role: string; content: string }> = [];
 

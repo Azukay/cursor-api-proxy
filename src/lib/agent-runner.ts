@@ -4,6 +4,13 @@ import { runAcpStream, runAcpSync } from "./acp-client.js";
 import type { BridgeConfig } from "./config.js";
 import { run, runStreaming } from "./process.js";
 import { getChatOnlyEnvOverrides } from "./workspace.js";
+import { readKeychainToken, writeCachedToken } from "../cli/usage.js";
+
+function cacheTokenForAccount(configDir?: string): void {
+  if (!configDir) return;
+  const token = readKeychainToken();
+  if (token) writeCachedToken(configDir, token);
+}
 
 export type AgentRunResult = {
   code: number;
@@ -34,6 +41,8 @@ export function runAgentSync(
   cmdArgs: string[],
   tempDir?: string,
   stdinPrompt?: string,
+  configDir?: string,
+  signal?: AbortSignal,
 ): Promise<AgentRunResult> {
   if (config.useAcp && typeof stdinPrompt === "string") {
     const acpModel = extractModelFromCmdArgs(cmdArgs);
@@ -53,6 +62,7 @@ export function runAgentSync(
       skipAuthenticate: config.acpSkipAuthenticate,
       rawDebug: config.acpRawDebug,
     }).then((out) => {
+      cacheTokenForAccount(configDir);
       if (tempDir) {
         try {
           fs.rmSync(tempDir, { recursive: true, force: true });
@@ -72,7 +82,10 @@ export function runAgentSync(
     maxMode: config.maxMode,
     stdinContent: stdinPrompt,
     envOverrides: runEnvOverrides,
+    configDir,
+    signal,
   }).then((out) => {
+    cacheTokenForAccount(configDir);
     if (tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -93,6 +106,8 @@ export function runAgentStream(
   onLine: StreamLineHandler,
   tempDir?: string,
   stdinPrompt?: string,
+  configDir?: string,
+  signal?: AbortSignal,
 ): Promise<{ code: number; stderr: string }> {
   if (config.useAcp && typeof stdinPrompt === "string") {
     const acpModel = extractModelFromCmdArgs(cmdArgs);
@@ -118,6 +133,7 @@ export function runAgentStream(
       },
       onLine,
     ).then((result) => {
+      cacheTokenForAccount(configDir);
       if (tempDir) {
         try {
           fs.rmSync(tempDir, { recursive: true, force: true });
@@ -138,7 +154,10 @@ export function runAgentStream(
     onLine,
     stdinContent: stdinPrompt,
     envOverrides: streamEnvOverrides,
+    configDir,
+    signal,
   }).then((result) => {
+    cacheTokenForAccount(configDir);
     if (tempDir) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });

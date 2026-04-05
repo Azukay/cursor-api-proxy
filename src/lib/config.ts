@@ -42,6 +42,12 @@ export type BridgeConfig = {
   acpSkipAuthenticate: boolean;
   /** When true, log every raw JSON-RPC line from ACP stdout (very verbose). Set CURSOR_BRIDGE_ACP_RAW_DEBUG=1 to enable. */
   acpRawDebug: boolean;
+  /** Pool of cursor configuration directories for round-robin account rotation. */
+  configDirs: string[];
+  /** When true, runs each config dir on its own incrementing port starting from `port` */
+  multiPort: boolean;
+  /** Windows CreateProcess command-line budget for prompt truncation (ignored on non-Windows). */
+  winCmdlineMax: number;
 };
 
 export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
@@ -92,5 +98,8 @@ export function loadBridgeConfig(opts: EnvOptions = {}): BridgeConfig {
     acpRawDebug: /^(1|true|yes|on)$/i.test(
       String(envSource.CURSOR_BRIDGE_ACP_RAW_DEBUG ?? "").trim(),
     ),
+    configDirs: env.configDirs ?? [],
+    multiPort: env.multiPort,
+    winCmdlineMax: env.winCmdlineMax,
   };
 }

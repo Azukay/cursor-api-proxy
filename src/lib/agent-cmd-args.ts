@@ -1,13 +1,12 @@
 import type { BridgeConfig } from "./config.js";
 
 /**
- * Build CLI arguments for running the Cursor agent.
+ * CLI flags and options for the Cursor agent, excluding the final prompt argument.
  */
-export function buildAgentCmdArgs(
+export function buildAgentFixedArgs(
   config: BridgeConfig,
   workspaceDir: string,
   model: string,
-  prompt: string,
   stream: boolean,
 ): string[] {
   const args = ["--print"];
@@ -22,8 +21,18 @@ export function buildAgentCmdArgs(
   } else {
     args.push("--output-format", "text");
   }
-  if (!config.promptViaStdin) {
-    args.push(prompt);
-  }
   return args;
+}
+
+/**
+ * Build CLI arguments for running the Cursor agent.
+ */
+export function buildAgentCmdArgs(
+  config: BridgeConfig,
+  workspaceDir: string,
+  model: string,
+  prompt: string,
+  stream: boolean,
+): string[] {
+  return [...buildAgentFixedArgs(config, workspaceDir, model, stream), prompt];
 }
