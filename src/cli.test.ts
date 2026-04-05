@@ -13,31 +13,149 @@ import { describe, it, expect } from "vitest";
 import { parseArgs } from "./cli.js";
 
 describe("parseArgs", () => {
+  const base = { resetHwid: false, deepClean: false, dryRun: false };
+
   it("parses empty argv", () => {
-    expect(parseArgs([])).toEqual({ tailscale: false, help: false });
+    expect(parseArgs([])).toEqual({
+      ...base,
+      tailscale: false,
+      help: false,
+      login: false,
+      logout: false,
+      accountsList: false,
+      accountName: "",
+      proxies: [],
+    });
   });
 
   it("parses --tailscale", () => {
-    expect(parseArgs(["--tailscale"])).toEqual({ tailscale: true, help: false });
+    expect(parseArgs(["--tailscale"])).toEqual({
+      ...base,
+      tailscale: true,
+      help: false,
+      login: false,
+      logout: false,
+      accountsList: false,
+      accountName: "",
+      proxies: [],
+    });
   });
 
   it("parses --help", () => {
-    expect(parseArgs(["--help"])).toEqual({ tailscale: false, help: true });
+    expect(parseArgs(["--help"])).toEqual({
+      ...base,
+      tailscale: false,
+      help: true,
+      login: false,
+      logout: false,
+      accountsList: false,
+      accountName: "",
+      proxies: [],
+    });
   });
 
   it("parses -h", () => {
-    expect(parseArgs(["-h"])).toEqual({ tailscale: false, help: true });
+    expect(parseArgs(["-h"])).toEqual({
+      ...base,
+      tailscale: false,
+      help: true,
+      login: false,
+      logout: false,
+      accountsList: false,
+      accountName: "",
+      proxies: [],
+    });
   });
 
   it("parses combined flags", () => {
-    expect(parseArgs(["--tailscale", "--help"])).toEqual({ tailscale: true, help: true });
+    expect(parseArgs(["--tailscale", "--help"])).toEqual({
+      ...base,
+      tailscale: true,
+      help: true,
+      login: false,
+      logout: false,
+      accountsList: false,
+      accountName: "",
+      proxies: [],
+    });
+  });
+
+  it("parses login command", () => {
+    expect(parseArgs(["login", "my-account"])).toEqual({
+      ...base,
+      tailscale: false,
+      help: false,
+      login: true,
+      logout: false,
+      accountsList: false,
+      accountName: "my-account",
+      proxies: [],
+    });
+  });
+
+  it("parses login with single proxy", () => {
+    expect(
+      parseArgs(["login", "my-account", "--proxy=http://proxy1:8080"]),
+    ).toEqual({
+      ...base,
+      tailscale: false,
+      help: false,
+      login: true,
+      logout: false,
+      accountsList: false,
+      accountName: "my-account",
+      proxies: ["http://proxy1:8080"],
+    });
+  });
+
+  it("parses login with multiple proxies", () => {
+    expect(
+      parseArgs([
+        "login",
+        "my-account",
+        "--proxy=http://p1:8080,socks5://p2:1080,http://p3:3128",
+      ]),
+    ).toEqual({
+      ...base,
+      tailscale: false,
+      help: false,
+      login: true,
+      logout: false,
+      accountsList: false,
+      accountName: "my-account",
+      proxies: ["http://p1:8080", "socks5://p2:1080", "http://p3:3128"],
+    });
+  });
+
+  it("parses logout command", () => {
+    expect(parseArgs(["logout", "my-account"])).toEqual({
+      ...base,
+      tailscale: false,
+      help: false,
+      login: false,
+      logout: true,
+      accountsList: false,
+      accountName: "my-account",
+      proxies: [],
+    });
+  });
+
+  it("parses accounts command", () => {
+    expect(parseArgs(["accounts"])).toEqual({
+      ...base,
+      tailscale: false,
+      help: false,
+      login: false,
+      logout: false,
+      accountsList: true,
+      accountName: "",
+      proxies: [],
+    });
   });
 
   it("throws on unknown argument", () => {
-    expect(() => parseArgs(["--unknown"])).toThrow("Unknown argument: --unknown");
-  });
-
-  it("throws on positional argument", () => {
-    expect(() => parseArgs(["foo"])).toThrow("Unknown argument: foo");
+    expect(() => parseArgs(["--unknown"])).toThrow(
+      "Unknown argument: --unknown",
+    );
   });
 });

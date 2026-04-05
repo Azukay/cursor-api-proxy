@@ -8,13 +8,25 @@ export function extractBearerToken(req: http.IncomingMessage): string | undefine
   return match ? match[1] : undefined;
 }
 
-export function json(res: http.ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+export function json(
+  res: http.ServerResponse,
+  status: number,
+  body: unknown,
+  extraHeaders?: http.OutgoingHttpHeaders,
+) {
+  res.writeHead(status, {
+    ...extraHeaders,
+    "Content-Type": "application/json",
+  });
   res.end(JSON.stringify(body));
 }
 
-export function writeSseHeaders(res: http.ServerResponse): void {
+export function writeSseHeaders(
+  res: http.ServerResponse,
+  extraHeaders?: http.OutgoingHttpHeaders,
+): void {
   res.writeHead(200, {
+    ...extraHeaders,
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",

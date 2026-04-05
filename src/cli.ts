@@ -1,63 +1,74 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import pkg from "../package.json" with { type: "json" };
 import { loadBridgeConfig } from "./lib/config.js";
-import { startBridgeServer } from "./lib/server.js";
+import { startBridgeServer, setupGracefulShutdown } from "./lib/server.js";
+import { parseArgs, printHelp } from "./cli/args.js";
+import { handleAccountsList, handleLogout } from "./cli/accounts.js";
+import { handleLogin } from "./cli/login.js";
+import { handleResetHwid } from "./cli/reset-hwid.js";
+
+// Re-export parseArgs so src/cli.test.ts can import it without a separate path
+export { parseArgs } from "./cli/args.js";
+
+// ---------------------------------------------------------------------------
+// Package metadata
+// ---------------------------------------------------------------------------
 
 const __filename = fileURLToPath(import.meta.url);
-const realArgv1 = process.argv[1]
-  ? fs.realpathSync(process.argv[1])
-  : "";
-const isMainModule = realArgv1 === fs.realpathSync(__filename);
+const __dirname = path.dirname(__filename);
+const pkgPath = path.join(__dirname, "..", "package.json");
+const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as {
+  version: string;
+};
 
-export function parseArgs(argv: string[]) {
-  let tailscale = false;
-  let help = false;
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
 
-  for (const arg of argv) {
-    if (arg === "--tailscale") {
-      tailscale = true;
-      continue;
-    }
-    if (arg === "--help" || arg === "-h") {
-      help = true;
-      continue;
-    }
-    throw new Error(`Unknown argument: ${arg}`);
-  }
-
-  return { tailscale, help };
-}
-
-function printHelp() {
-  console.log("cursor-api-proxy");
-  console.log("");
-  console.log("Usage:");
-  console.log("  cursor-api-proxy [--tailscale]");
-  console.log("");
-  console.log("Options:");
-  console.log("  --tailscale  Bind to 0.0.0.0 for tailnet/LAN access");
-  console.log("  -h, --help   Show this help message");
-}
-
-async function main() {
+async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
-    printHelp();
+    printHelp(pkg.version);
+    return;
+  }
+
+  if (args.login) {
+    await handleLogin(args.accountName, args.proxies);
+    return;
+  }
+
+  if (args.logout) {
+    await handleLogout(args.accountName);
+    return;
+  }
+
+  if (args.accountsList) {
+    await handleAccountsList();
+    return;
+  }
+
+  if (args.resetHwid) {
+    await handleResetHwid({ deepClean: args.deepClean, dryRun: args.dryRun });
     return;
   }
 
   const config = loadBridgeConfig({ tailscale: args.tailscale });
-  startBridgeServer({ version: pkg.version, config });
+  const servers = startBridgeServer({ version: pkg.version, config });
+  setupGracefulShutdown(servers);
 }
+
+const realArgv1 = process.argv[1] ? fs.realpathSync(process.argv[1]) : "";
+const isMainModule = realArgv1 === fs.realpathSync(__filename);
 
 if (isMainModule) {
   main().catch((err) => {
-    console.error(err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`Error: ${msg}`);
     process.exit(1);
   });
 }
