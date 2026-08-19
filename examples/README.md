@@ -55,3 +55,16 @@ node examples/test-stream.mjs
 ```
 
 Prints each streamed chunk and the total character count.
+
+### benchmark-latency.mjs
+
+Full latency breakdown for debugging slow requests: CLI spawn, direct CLI/ACP, proxy sync/stream, ephemeral ACP proxy, and client-tool round-trip.
+
+```bash
+npm run build
+node examples/benchmark-latency.mjs
+```
+
+Phases 5–7 spawn short-lived proxies on free ports (`CURSOR_BRIDGE_USE_ACP=true`).
+
+Useful env: `BENCH_SKIP_EPHEMERAL=1`, `BENCH_COMPARE_AGENT=1`, `BENCH_MAX_MODE=1`, `BENCH_MODEL`, `CURSOR_PROXY_URL`.
