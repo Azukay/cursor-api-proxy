@@ -261,6 +261,12 @@ cmd_enable() {
   mkdir -p "$(dirname "$PLIST")"
   local launcher
   launcher="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  local agent_bin=""
+  if command -v cursor-agent >/dev/null 2>&1; then
+    agent_bin="$(command -v cursor-agent)"
+  elif [[ -x "${HOME}/.local/bin/cursor-agent" ]]; then
+    agent_bin="${HOME}/.local/bin/cursor-agent"
+  fi
   cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -270,10 +276,11 @@ cmd_enable() {
   <key>WorkingDirectory</key><string>${ROOT}</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:${HOME}/.asdf/shims:/usr/bin:/bin</string>
     <key>CURSOR_API_PROXY_ROOT</key><string>${ROOT}</string>
     <key>CURSOR_BRIDGE_PORT</key><string>${PORT}</string>
-    <key>CURSOR_BRIDGE_HOST</key><string>${HOST}</string>
+    <key>CURSOR_BRIDGE_HOST</key><string>${HOST}</string>${agent_bin:+
+    <key>CURSOR_AGENT_BIN</key><string>${agent_bin}</string>}
   </dict>
   <key>ProgramArguments</key>
   <array>
