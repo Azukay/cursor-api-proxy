@@ -114,7 +114,7 @@ export class ClientToolBridge {
         );
       }
 
-      return new Promise<ToolCallResult>((resolve, reject) => {
+      const callPromise = new Promise<ToolCallResult>((resolve, reject) => {
         this.#totalCalls += 1;
         this.#pending.set(callId, {
           callId,
@@ -127,6 +127,8 @@ export class ClientToolBridge {
         });
         for (const listener of this.#callListeners) listener();
       });
+      void callPromise.catch(() => undefined);
+      return callPromise;
     });
 
     this.#httpServer = http.createServer((req, res) => {

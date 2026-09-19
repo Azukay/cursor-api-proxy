@@ -307,7 +307,7 @@ export class AcpConnection {
       return Promise.reject(new Error("ACP connection is closed"));
     }
     const id = this.#nextId.current++;
-    return new Promise((resolve, reject) => {
+    const promise = new Promise((resolve, reject) => {
       const pending: PendingRequest = { resolve, reject };
       if (timeoutMs > 0) {
         pending.timer = setTimeout(() => {
@@ -329,6 +329,8 @@ export class AcpConnection {
         },
       );
     });
+    void promise.catch(() => undefined);
+    return promise;
   }
 
   async cancelSession(sessionId: string): Promise<void> {

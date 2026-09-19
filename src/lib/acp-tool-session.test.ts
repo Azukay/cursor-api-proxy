@@ -161,8 +161,7 @@ describe("AcpToolSession", () => {
     await session.start("Use weather");
     const first = await session.collect();
     expect(first.status).toBe("tool_calls");
-    await new Promise((resolve) => setTimeout(resolve, 180));
-    expect(session.closed).toBe(true);
+    await expect.poll(() => session.closed).toBe(true);
   });
 
   it("fails the live turn when the ACP process exits", async () => {

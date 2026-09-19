@@ -322,7 +322,7 @@ export class AcpToolSession {
     if (this.#ttl) clearTimeout(this.#ttl);
     if (this.#opts.timeoutMs <= 0) return;
     this.#ttl = setTimeout(() => {
-      void this.close();
+      void this.close().catch(() => undefined);
     }, this.#opts.timeoutMs);
     this.#ttl.unref?.();
   }
